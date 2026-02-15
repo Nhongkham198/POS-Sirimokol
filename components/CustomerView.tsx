@@ -601,17 +601,25 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
             Swal.fire({ title: t('กำลังส่งรายการ...'), allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
 
             try {
-                // Revert names to Thai for backend
+                // CRITICAL FIX: Revert names to Thai and ensure no 'undefined' values before sending to backend.
                 const itemsToSend = cartItems.map(cartItem => {
                     const originalItem = menuItems.find(m => m.id === cartItem.id);
                     return {
                         ...cartItem,
-                        name: originalItem ? originalItem.name : cartItem.name, 
-                        nameEn: originalItem?.nameEn, 
+                        // Revert main name to original (Thai)
+                        name: originalItem ? originalItem.name : cartItem.name,
+                        // Safely revert english name, defaulting to empty string
+                        nameEn: originalItem?.nameEn || '',
+                        
+                        // Also revert names within selected options
                         selectedOptions: cartItem.selectedOptions.map(opt => {
                             const originalGroup = originalItem?.optionGroups?.find(g => g.options.some(o => o.id === opt.id));
                             const originalOpt = originalGroup?.options.find(o => o.id === opt.id);
-                            return { ...opt, name: originalOpt ? originalOpt.name : opt.name };
+                            return {
+                                ...opt,
+                                name: originalOpt ? originalOpt.name : opt.name,
+                                nameEn: originalOpt?.nameEn || '' // Safety fix for options
+                            };
                         })
                     };
                 });
