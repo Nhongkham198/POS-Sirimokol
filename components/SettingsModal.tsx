@@ -464,11 +464,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = (props) => {
 
         const result = await Swal.fire({
             title: 'ยืนยันการเริ่มระบบฐานข้อมูล',
-            text: 'ระบบจะเขียนข้อมูลเริ่มต้น (เมนู, โต๊ะ, ผู้ใช้) ลงในฐานข้อมูล Cloud การกระทำนี้ใช้สำหรับเริ่มระบบใหม่เท่านั้น หากมีข้อมูลเดิมอยู่แล้วอาจถูกเขียนทับ',
-            icon: 'warning',
+            text: 'ระบบจะตรวจสอบและสร้างข้อมูลเริ่มต้น (เมนู, โต๊ะ, ผู้ใช้) ในฐานข้อมูล หากมีข้อมูลอยู่แล้วจะไม่ถูกเขียนทับ',
+            icon: 'info',
             showCancelButton: true,
-            confirmButtonText: 'ยืนยัน เขียนข้อมูลเดี๋ยวนี้',
-            confirmButtonColor: '#d33',
+            confirmButtonText: 'ยืนยัน เริ่มระบบ',
+            confirmButtonColor: '#3085d6',
             cancelButtonText: 'ยกเลิก'
         });
 
@@ -476,41 +476,69 @@ export const SettingsModal: React.FC<SettingsModalProps> = (props) => {
             try {
                 // Show loading with a note about offline mode
                 Swal.fire({ 
-                    title: 'กำลังเขียนข้อมูล...', 
+                    title: 'กำลังตรวจสอบและเขียนข้อมูล...', 
                     text: 'กรุณารอสักครู่ (หากนานเกิน 5 วินาที ระบบจะบันทึกแบบ Offline อัตโนมัติ)',
                     didOpen: () => Swal.showLoading() 
                 });
                 
-                // Write Default Data to Firestore (Global & Branch 1)
                 const batch = db.batch();
                 
-                // 1. Global Users
-                batch.set(db.doc('users/data'), { value: DEFAULT_USERS });
+                // Get current branch ID from URL or local storage if possible, otherwise default to 1
+                // We'll try to detect the active branch ID from the URL params or selectedBranch in localStorage
+                let activeBranchId = '1';
+                const urlParams = new URLSearchParams(window.location.search);
+                const urlBranch = urlParams.get('branchId');
+                
+                if (urlBranch) {
+                    activeBranchId = urlBranch;
+                } else {
+                     try {
+                        const storedBranch = localStorage.getItem('selectedBranch');
+                        if (storedBranch) {
+                            const b = JSON.parse(storedBranch);
+                            if (b && b.id) activeBranchId = b.id.toString();
+                        }
+                     } catch(e) {}
+                }
+
+                // Helper to set only if not exists or merge safely
+                const setIfMissingOrMerge = async (ref: any, defaultData: any) => {
+                    const doc = await ref.get();
+                    if (!doc.exists) {
+                         batch.set(ref, { value: defaultData });
+                    } else {
+                         // If exists, do nothing or merge? For initial seeding, we prefer not to overwrite existing user data.
+                         // But we want to ensure structure exists.
+                         // For arrays like menuItems, if empty, we might want to seed.
+                         const data = doc.data();
+                         if (!data || !data.value || (Array.isArray(data.value) && data.value.length === 0)) {
+                              batch.set(ref, { value: defaultData }, { merge: true });
+                         }
+                    }
+                };
+
+                // 1. Global Users (Only set if absolutely missing to avoid resetting passwords)
+                await setIfMissingOrMerge(db.doc('users/data'), DEFAULT_USERS);
                 
                 // 2. Global Branches
-                batch.set(db.doc('branches/data'), { value: DEFAULT_BRANCHES });
+                await setIfMissingOrMerge(db.doc('branches/data'), DEFAULT_BRANCHES);
                 
-                // 3. Branch 1 Data (MenuItems, Tables, Stock, Maintenance)
-                const branchId = '1';
-                batch.set(db.doc(`branches/${branchId}/menuItems/data`), { value: DEFAULT_MENU_ITEMS });
-                batch.set(db.doc(`branches/${branchId}/tables/data`), { value: DEFAULT_TABLES });
-                batch.set(db.doc(`branches/${branchId}/stockItems/data`), { value: DEFAULT_STOCK_ITEMS });
-                batch.set(db.doc(`branches/${branchId}/maintenanceItems/data`), { value: DEFAULT_MAINTENANCE_ITEMS });
+                // 3. Current Branch Data
+                await setIfMissingOrMerge(db.doc(`branches/${activeBranchId}/menuItems/data`), DEFAULT_MENU_ITEMS);
+                await setIfMissingOrMerge(db.doc(`branches/${activeBranchId}/tables/data`), DEFAULT_TABLES);
+                await setIfMissingOrMerge(db.doc(`branches/${activeBranchId}/stockItems/data`), DEFAULT_STOCK_ITEMS);
+                await setIfMissingOrMerge(db.doc(`branches/${activeBranchId}/maintenanceItems/data`), DEFAULT_MAINTENANCE_ITEMS);
                 
                 // --- TIMEOUT LOGIC TO PREVENT HANGING ---
-                // Create a promise that rejects after 5 seconds
                 const timeout = new Promise((_, reject) => 
                     setTimeout(() => reject(new Error('TIMEOUT')), 5000)
                 );
 
-                // Race the commit against the timeout
                 await Promise.race([batch.commit(), timeout]);
                 
-                Swal.fire('สำเร็จ', 'เขียนข้อมูลเริ่มต้นลงฐานข้อมูลเรียบร้อยแล้ว', 'success');
+                Swal.fire('สำเร็จ', `ตรวจสอบและเริ่มระบบฐานข้อมูล (สาขา ${activeBranchId}) เรียบร้อยแล้ว`, 'success');
 
             } catch (error: any) {
-                // If it timed out, it means persistence likely queued it but the server hasn't ack'd yet.
-                // We treat this as a success for the user's perspective in Offline mode.
                 if (error.message === 'TIMEOUT') {
                      Swal.fire({
                         icon: 'info',

@@ -108,6 +108,7 @@ export function useFirestoreSync<T>(
 
                         setValue(valueToSet as T);
                     } else {
+                        // Data undefined but doc exists? fallback to initial
                         setValue(currentInitialValue);
                     }
                 } else {
@@ -165,6 +166,9 @@ export function useFirestoreSync<T>(
         const isBranchSpecific = !globalKeys.includes(collectionKey);
         
         if (isBranchSpecific && !branchId) {
+             // If trying to set a branch-specific value but no branch is selected, just update local state
+             // This prevents "flicker" but warns that data won't persist
+             console.warn(`Attempted to save ${collectionKey} without a valid Branch ID. Data will be local only.`);
              setValue(newValue);
              return;
         }
