@@ -4,6 +4,8 @@ import type { PrinterConfig, ReceiptPrintSettings, KitchenPrinterSettings, Cashi
 import { printerService } from '../services/printerService';
 import Swal from 'sweetalert2';
 import { MenuItemImage } from './MenuItemImage';
+import { db } from '../firebaseConfig';
+import { DEFAULT_MENU_ITEMS, DEFAULT_TABLES, DEFAULT_USERS, DEFAULT_BRANCHES, DEFAULT_STOCK_ITEMS, DEFAULT_MAINTENANCE_ITEMS } from '../constants';
 
 interface SettingsModalProps {
     isOpen: boolean;
@@ -113,7 +115,7 @@ const StatusIndicator: React.FC<{ status: PrinterStatus; label: string }> = ({ s
 };
 
 export const SettingsModal: React.FC<SettingsModalProps> = (props) => {
-    const [activeTab, setActiveTab] = useState<'general' | 'printer' | 'menu' | 'delivery'>('general');
+    const [activeTab, setActiveTab] = useState<'general' | 'printer' | 'menu' | 'delivery' | 'database'>('general');
     
     // State initialization
     const [settingsForm, setSettingsForm] = useState({
@@ -453,6 +455,53 @@ export const SettingsModal: React.FC<SettingsModalProps> = (props) => {
         ));
     };
 
+    // --- DB Initialization Handler ---
+    const handleInitializeDb = async () => {
+        if (!db) {
+            Swal.fire('ข้อผิดพลาด', 'ไม่พบการเชื่อมต่อ Firebase กรุณาตรวจสอบ Config', 'error');
+            return;
+        }
+
+        const result = await Swal.fire({
+            title: 'ยืนยันการเริ่มระบบฐานข้อมูล',
+            text: 'ระบบจะเขียนข้อมูลเริ่มต้น (เมนู, โต๊ะ, ผู้ใช้) ลงในฐานข้อมูล Cloud การกระทำนี้ใช้สำหรับเริ่มระบบใหม่เท่านั้น หากมีข้อมูลเดิมอยู่แล้วอาจถูกเขียนทับ',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'ยืนยัน เขียนข้อมูลเดี๋ยวนี้',
+            confirmButtonColor: '#d33',
+            cancelButtonText: 'ยกเลิก'
+        });
+
+        if (result.isConfirmed) {
+            try {
+                Swal.fire({ title: 'กำลังเขียนข้อมูล...', didOpen: () => Swal.showLoading() });
+                
+                // Write Default Data to Firestore (Global & Branch 1)
+                const batch = db.batch();
+                
+                // 1. Global Users
+                batch.set(db.doc('users/data'), { value: DEFAULT_USERS });
+                
+                // 2. Global Branches
+                batch.set(db.doc('branches/data'), { value: DEFAULT_BRANCHES });
+                
+                // 3. Branch 1 Data (MenuItems, Tables, Stock, Maintenance)
+                const branchId = '1';
+                batch.set(db.doc(`branches/${branchId}/menuItems/data`), { value: DEFAULT_MENU_ITEMS });
+                batch.set(db.doc(`branches/${branchId}/tables/data`), { value: DEFAULT_TABLES });
+                batch.set(db.doc(`branches/${branchId}/stockItems/data`), { value: DEFAULT_STOCK_ITEMS });
+                batch.set(db.doc(`branches/${branchId}/maintenanceItems/data`), { value: DEFAULT_MAINTENANCE_ITEMS });
+                
+                await batch.commit();
+                
+                Swal.fire('สำเร็จ', 'เขียนข้อมูลเริ่มต้นลงฐานข้อมูลเรียบร้อยแล้ว', 'success');
+            } catch (error: any) {
+                console.error("Init DB Error:", error);
+                Swal.fire('ล้มเหลว', `เกิดข้อผิดพลาด: ${error.message}`, 'error');
+            }
+        }
+    };
+
     if (!props.isOpen) return null;
 
     // ... (Helper render functions: renderImageUpload, renderSoundUpload) ...
@@ -726,12 +775,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = (props) => {
                     </button>
                 </div>
 
-                <div className="flex border-b bg-white">
-                    {['general', 'printer', 'menu', 'delivery'].map(tab => (
+                <div className="flex border-b bg-white overflow-x-auto">
+                    {['general', 'printer', 'menu', 'delivery', 'database'].map(tab => (
                         <button
                             key={tab}
                             onClick={() => setActiveTab(tab as any)}
-                            className={`px-6 py-3 font-semibold text-sm transition-colors border-b-2 ${
+                            className={`px-6 py-3 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap ${
                                 activeTab === tab ? 'border-blue-600 text-blue-600 bg-blue-50' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
                             }`}
                         >
@@ -739,11 +788,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = (props) => {
                             {tab === 'printer' && 'เครื่องพิมพ์'}
                             {tab === 'menu' && 'เมนูแนะนำ'}
                             {tab === 'delivery' && 'Delivery'}
+                            {tab === 'database' && 'ฐานข้อมูล'}
                         </button>
                     ))}
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-6 bg-gray-50">
+                    {/* ... (Existing Tabs: general, printer, menu, delivery) ... */}
                     {activeTab === 'general' && (
                         <div className="space-y-6 max-w-3xl mx-auto">
                             <div className="bg-white p-6 rounded-lg shadow-sm space-y-4">
@@ -928,6 +979,44 @@ export const SettingsModal: React.FC<SettingsModalProps> = (props) => {
                                         </div>
                                     </div>
                                 ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* NEW: Database Maintenance Tab */}
+                    {activeTab === 'database' && (
+                        <div className="bg-white p-6 rounded-lg shadow-sm max-w-3xl mx-auto space-y-6">
+                            <div className="border-l-4 border-yellow-400 bg-yellow-50 p-4 rounded">
+                                <div className="flex">
+                                    <div className="flex-shrink-0">
+                                        <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                                            <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.21 3.03-1.742 3.03H4.42c-1.532 0-2.492-1.696-1.742-3.03l5.58-9.92zM10 13a1 1 0 110-2 1 1 0 010 2zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                                        </svg>
+                                    </div>
+                                    <div className="ml-3">
+                                        <h3 className="text-sm font-medium text-yellow-800">เครื่องมือสำหรับ Admin</h3>
+                                        <div className="mt-2 text-sm text-yellow-700">
+                                            <p>ใช้สำหรับเริ่มระบบใหม่ หรือแก้ปัญหาข้อมูลไม่ซิงค์กัน</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="p-6 border border-gray-200 rounded-lg">
+                                <h4 className="text-lg font-bold text-gray-900 mb-2">เริ่มระบบฐานข้อมูล (Initialize DB)</h4>
+                                <p className="text-gray-600 mb-4 text-sm">
+                                    หากคุณเพิ่ง Deploy ระบบใหม่ หรือพบปัญหาข้อมูลว่างเปล่า (เช่น เมนูไม่ขึ้น ผู้ใช้หาย) 
+                                    ปุ่มนี้จะทำการเขียนข้อมูลเริ่มต้น (Default Data) ลงไปยัง Firebase Firestore
+                                </p>
+                                <button 
+                                    onClick={handleInitializeDb}
+                                    className="w-full sm:w-auto px-6 py-3 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 shadow-md transition-colors flex items-center justify-center gap-2"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+                                    </svg>
+                                    เขียนข้อมูลเริ่มต้นทับ (Reset)
+                                </button>
                             </div>
                         </div>
                     )}

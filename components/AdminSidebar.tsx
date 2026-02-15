@@ -3,6 +3,7 @@ import React, { useState, ReactNode, useRef, useMemo, useEffect } from 'react';
 import type { User, View, PrinterConfig, PrinterStatus } from '../types';
 import Swal from 'sweetalert2';
 import { printerService } from '../services/printerService';
+import { db } from '../firebaseConfig'; // Import db to check status
 
 interface AdminSidebarProps {
     isCollapsed: boolean;
@@ -205,6 +206,14 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
     // Printer Status
     const [kitchenStatus, setKitchenStatus] = useState<PrinterStatus>('idle');
     const [cashierStatus, setCashierStatus] = useState<PrinterStatus>('idle');
+    
+    // DB Connection Status
+    const [isDbConnected, setIsDbConnected] = useState(false);
+
+    useEffect(() => {
+        // Simple check for DB connection by checking if 'db' object exists and is not null
+        setIsDbConnected(!!db);
+    }, []);
 
     const checkPrinter = async (type: 'kitchen' | 'cashier') => {
         if (!printerConfig) return;
@@ -391,7 +400,18 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
                         )}
                     </div>
 
-                    {/* Printer Status (Added) */}
+                    {/* DB & Printer Status */}
+                    <div className={`grid grid-cols-1 gap-2 mt-1 ${isCollapsed ? 'hidden' : 'block'}`}>
+                        {/* Cloud DB Status */}
+                        <div className={`flex items-center gap-2 p-1.5 rounded w-full transition-colors ${isDbConnected ? 'text-green-400 bg-green-900/20' : 'text-red-400 bg-red-900/20 animate-pulse'}`}>
+                            <div className={`w-2 h-2 rounded-full ${isDbConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                            </svg>
+                            <span className="text-xs font-medium">{isDbConnected ? 'Database: Connected' : 'Database: Error'}</span>
+                        </div>
+                    </div>
+                    
                     <div className={`grid grid-cols-2 gap-2 mt-1 ${isCollapsed ? 'hidden' : 'block'}`}>
                         <SidebarPrinterStatus type="kitchen" status={kitchenStatus} onClick={() => checkPrinter('kitchen')} isCollapsed={isCollapsed} />
                         <SidebarPrinterStatus type="cashier" status={cashierStatus} onClick={() => checkPrinter('cashier')} isCollapsed={isCollapsed} />

@@ -39,7 +39,7 @@ export function useFirestoreSync<T>(
             'restaurantName', 
             'restaurantAddress', 
             'restaurantPhone', 
-            'taxId',
+            'taxId', 
             'qrCodeUrl',
             'signatureUrl',
             'notificationSoundUrl',
@@ -111,11 +111,29 @@ export function useFirestoreSync<T>(
                         setValue(currentInitialValue);
                     }
                 } else {
+                    // Document doesn't exist yet, stick with defaults but don't error out
+                    // This allows "Initialization" to happen later
                     setValue(currentInitialValue);
                 }
             },
             (error) => {
                 console.error(`Firestore sync error for ${collectionKey}:`, error);
+                // NOTIFY USER OF CONNECTION ERRORS
+                if (error.code === 'permission-denied') {
+                    // Silent fail for permissions usually, but good to know in dev
+                    console.warn("Permission denied for", collectionKey);
+                } else {
+                    // Show toast for other connectivity issues
+                    Swal.fire({
+                        icon: 'warning',
+                        title: 'การเชื่อมต่อฐานข้อมูลขัดข้อง',
+                        text: `ไม่สามารถดึงข้อมูลล่าสุดได้ (${collectionKey})`,
+                        toast: true,
+                        position: 'bottom-end',
+                        showConfirmButton: false,
+                        timer: 5000
+                    });
+                }
             }
         );
 
@@ -123,7 +141,10 @@ export function useFirestoreSync<T>(
     }, [branchId, collectionKey]);
 
     const setAndSyncValue = useCallback((newValue: React.SetStateAction<T>) => {
-        if (!db) return;
+        if (!db) {
+            Swal.fire('เชื่อมต่อไม่ได้', 'ไม่พบการตั้งค่าฐานข้อมูล (Firebase)', 'error');
+            return;
+        }
 
         const globalKeys = [
             'users', 
@@ -160,16 +181,21 @@ export function useFirestoreSync<T>(
             docRef.set({ value: resolvedValue })
                 .catch(err => {
                     console.error(`Failed to write ${collectionKey} to Firestore:`, err);
-                    // ALERT USER ON ERROR
+                    // ALERT USER ON WRITE ERROR - This is critical
                     Swal.fire({
                         icon: 'error',
-                        title: 'บันทึกข้อมูลไม่สำเร็จ',
-                        text: `เกิดข้อผิดพลาดในการบันทึก ${collectionKey}`,
-                        footer: '<p style="text-align:center">ข้อมูลอาจมีขนาดใหญ่เกินไป (เช่น รูปภาพ)<br/>หรืออินเทอร์เน็ตมีปัญหา</p>',
-                        toast: true,
-                        position: 'top-end',
-                        showConfirmButton: false,
-                        timer: 5000
+                        title: 'บันทึกข้อมูลไม่สำเร็จ!',
+                        html: `
+                            <p>ข้อมูลที่คุณแก้ <b>จะไม่ถูกบันทึกลงระบบจริง</b></p>
+                            <p class="text-sm mt-2 text-gray-500">สาเหตุที่เป็นไปได้:</p>
+                            <ul class="text-sm text-left list-disc list-inside text-gray-500 mb-2">
+                                <li>Config (API Key) ไม่ถูกต้อง</li>
+                                <li>อินเทอร์เน็ตหลุด</li>
+                                <li>ไม่มีสิทธิ์เขียนข้อมูล</li>
+                            </ul>
+                            <p class="text-xs text-red-500">${err.message}</p>
+                        `,
+                        confirmButtonText: 'รับทราบ'
                     });
                 });
                 
@@ -207,6 +233,15 @@ export function useFirestoreCollection<T extends { id: number | string }>(
             setData(items);
         }, error => {
             console.error(`Error syncing collection ${collectionName}:`, error);
+            Swal.fire({
+                icon: 'warning',
+                title: 'Sync Error',
+                text: `ไม่สามารถซิงค์ข้อมูล ${collectionName}`,
+                toast: true,
+                position: 'bottom-end',
+                showConfirmButton: false,
+                timer: 4000
+            });
         });
 
         return () => unsubscribe();
@@ -223,7 +258,7 @@ export function useFirestoreCollection<T extends { id: number | string }>(
                 });
             } catch (err: any) {
                 console.error(`Failed to add to ${collectionName}:`, err);
-                Swal.fire('บันทึกไม่สำเร็จ', 'ข้อมูลอาจใหญ่เกินไป', 'error');
+                Swal.fire('บันทึกไม่สำเร็จ', 'ตรวจสอบการเชื่อมต่อหรือขนาดข้อมูล', 'error');
             }
         },
         update: async (id: number | string, updates: Partial<T>) => {
@@ -235,7 +270,7 @@ export function useFirestoreCollection<T extends { id: number | string }>(
                 });
             } catch (err: any) {
                 console.error(`Failed to update ${collectionName}:`, err);
-                Swal.fire('แก้ไขไม่สำเร็จ', 'ข้อมูลอาจใหญ่เกินไป', 'error');
+                Swal.fire('แก้ไขไม่สำเร็จ', 'ตรวจสอบการเชื่อมต่อหรือขนาดข้อมูล', 'error');
             }
         },
         remove: async (id: number | string) => {

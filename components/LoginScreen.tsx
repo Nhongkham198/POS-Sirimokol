@@ -1,5 +1,6 @@
 
 import React, { useState } from 'react';
+import { isFirebaseConfigured } from '../firebaseConfig'; // Import check
 
 interface LoginScreenProps {
     onLogin: (username: string, password: string) => Promise<{ success: boolean; error?: string }> | { success: boolean; error?: string };
@@ -62,6 +63,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, logoUrl, rest
     return (
         <div className="min-h-screen flex items-center justify-center bg-[#111827] p-4">
             <div className="max-w-[400px] w-full bg-white rounded-[32px] shadow-2xl p-8 space-y-6 animate-fade-in-up">
+                
+                {/* CONFIG WARNING */}
+                {!isFirebaseConfigured && (
+                    <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-4 rounded shadow-sm text-sm">
+                        <p className="font-bold">⚠️ ยังไม่ได้ตั้งค่า Firebase Config</p>
+                        <p>กรุณาแก้ไขไฟล์ <code>firebaseConfig.ts</code> โดยใส่ API Key ของโปรเจกต์จริงของคุณ</p>
+                    </div>
+                )}
+
                 <div className="text-center flex flex-col items-center">
                     <div className="mb-4 relative">
                         {/* Logo Circle with Shadow */}
