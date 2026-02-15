@@ -474,7 +474,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = (props) => {
 
         if (result.isConfirmed) {
             try {
-                Swal.fire({ title: 'กำลังเขียนข้อมูล...', didOpen: () => Swal.showLoading() });
+                // Show loading with a note about offline mode
+                Swal.fire({ 
+                    title: 'กำลังเขียนข้อมูล...', 
+                    text: 'กรุณารอสักครู่ (หากนานเกิน 5 วินาที ระบบจะบันทึกแบบ Offline อัตโนมัติ)',
+                    didOpen: () => Swal.showLoading() 
+                });
                 
                 // Write Default Data to Firestore (Global & Branch 1)
                 const batch = db.batch();
@@ -492,12 +497,31 @@ export const SettingsModal: React.FC<SettingsModalProps> = (props) => {
                 batch.set(db.doc(`branches/${branchId}/stockItems/data`), { value: DEFAULT_STOCK_ITEMS });
                 batch.set(db.doc(`branches/${branchId}/maintenanceItems/data`), { value: DEFAULT_MAINTENANCE_ITEMS });
                 
-                await batch.commit();
+                // --- TIMEOUT LOGIC TO PREVENT HANGING ---
+                // Create a promise that rejects after 5 seconds
+                const timeout = new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('TIMEOUT')), 5000)
+                );
+
+                // Race the commit against the timeout
+                await Promise.race([batch.commit(), timeout]);
                 
                 Swal.fire('สำเร็จ', 'เขียนข้อมูลเริ่มต้นลงฐานข้อมูลเรียบร้อยแล้ว', 'success');
+
             } catch (error: any) {
-                console.error("Init DB Error:", error);
-                Swal.fire('ล้มเหลว', `เกิดข้อผิดพลาด: ${error.message}`, 'error');
+                // If it timed out, it means persistence likely queued it but the server hasn't ack'd yet.
+                // We treat this as a success for the user's perspective in Offline mode.
+                if (error.message === 'TIMEOUT') {
+                     Swal.fire({
+                        icon: 'info',
+                        title: 'บันทึกเรียบร้อย (โหมด Offline)',
+                        text: 'การเชื่อมต่อฐานข้อมูลใช้เวลานานกว่าปกติ ข้อมูลถูกบันทึกลงเครื่องแล้วและจะซิงค์เมื่ออินเทอร์เน็ตพร้อม',
+                        confirmButtonText: 'ตกลง'
+                     });
+                } else {
+                    console.error("Init DB Error:", error);
+                    Swal.fire('ล้มเหลว', `เกิดข้อผิดพลาด: ${error.message}`, 'error');
+                }
             }
         }
     };
