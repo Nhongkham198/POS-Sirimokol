@@ -931,24 +931,39 @@ export const App: React.FC = () => {
                         const shouldSendToKitchen = isCustomerMode || sendToKitchen || isLineMan;
                         const isPrintedImmediatelyByThisDevice = !isCustomerMode && shouldSendToKitchen;
                         
-                        const newOrder: ActiveOrder = { 
-                            id: Date.now(), 
-                            orderNumber: nextOrderId, 
-                            manualOrderNumber: lineManNumber || null, 
-                            tableId: orderTableId, 
-                            tableName: orderTableName, 
-                            customerName: custName, 
-                            floor: orderFloor, 
-                            customerCount: custCount, 
-                            items: itemsWithOrigin, 
-                            status: shouldSendToKitchen ? 'waiting' : 'served', 
-                            orderTime: Date.now(), 
-                            orderType: isLineMan ? 'lineman' : 'dine-in', 
-                            taxRate: isTaxEnabled ? taxRate : 0, 
-                            taxAmount: 0, 
+                        const newOrder: ActiveOrder = {
+                            id: Date.now(),
+                            orderNumber: nextOrderId,
+                            tableId: orderTableId,
+                            tableName: orderTableName,
+                            floor: orderFloor,
+                            customerCount: custCount,
+                            items: itemsWithOrigin,
+                            status: shouldSendToKitchen ? 'waiting' : 'served',
+                            orderTime: Date.now(),
+                            orderType: isLineMan ? 'lineman' : 'dine-in',
+                            taxRate: isTaxEnabled ? taxRate : 0,
+                            taxAmount: 0, // This is calculated right after
                             placedBy: currentUser ? currentUser.username : (custName || `โต๊ะ ${orderTableName}`),
+                            
+                            // --- SAFETY FIX for UNDEFINED values ---
+                            // Explicitly define all optional fields to prevent silent Firestore write failures.
+                            customerName: custName || '',
+                            manualOrderNumber: lineManNumber || null,
                             isPrintedToKitchen: isPrintedImmediatelyByThisDevice,
-                        }; 
+                            cookingStartTime: null,
+                            isOverdue: false,
+                            parentOrderId: null,
+                            takeawayCutlery: [],
+                            takeawayCutleryNotes: '',
+                            isDeleted: false,
+                            deletedBy: null,
+                            mergedOrderNumbers: [],
+                            splitCount: 0,
+                            isSplitChild: false,
+                            splitIndex: 0,
+                        };
+                        
                         const subtotal = newOrder.items.reduce((sum, item) => sum + item.finalPrice * item.quantity, 0); 
                         newOrder.taxAmount = newOrder.taxRate > 0 ? subtotal * (newOrder.taxRate / 100) : 0; 
                         transaction.set(counterRef, { value: { count: nextOrderId, lastResetDate: todayStr } }); 
