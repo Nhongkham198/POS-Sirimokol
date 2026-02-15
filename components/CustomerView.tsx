@@ -113,7 +113,7 @@ interface CustomerViewProps {
     activeOrders: ActiveOrder[];
     allBranchOrders: ActiveOrder[]; 
     completedOrders: CompletedOrder[];
-    onPlaceOrder: (items: OrderItem[], customerName: string) => Promise<number | void | undefined>;
+    onPlaceOrder: (items: OrderItem[], customerName: string) => Promise<ActiveOrder | void | undefined>;
     onStaffCall: (table: Table, customerName: string) => void;
     recommendedMenuItemIds: number[];
     logoUrl: string | null;
@@ -144,6 +144,10 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
     const [isSessionCompleted, setIsSessionCompleted] = useState(() => {
         return sessionStorage.getItem(`customer_completed_${table.id}`) === 'true';
     });
+    
+    // NEW: State for optimistic updates. Holds new orders immediately after placing them.
+    const [optimisticOrders, setOptimisticOrders] = useState<ActiveOrder[]>([]);
+
 
     // --- NEW: Loading Screen State ---
     // Update logic: Check sessionStorage to skip loading on refresh
@@ -366,16 +370,26 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
         }
     }, [allBranchOrders, myOrderNumbers, table.id, isSessionCompleted]);
     // -------------------------------------------
+    
+    // NEW: Combine real-time orders with optimistic orders for instant UI updates.
+    const combinedActiveOrders = useMemo(() => {
+        const allOrdersMap = new Map<number, ActiveOrder>();
+        // Add real orders from props first
+        allBranchOrders.forEach(order => allOrdersMap.set(order.id, order));
+        // Add/overwrite with optimistic orders to ensure the latest data is used
+        optimisticOrders.forEach(order => allOrdersMap.set(order.id, order));
+        return Array.from(allOrdersMap.values());
+    }, [allBranchOrders, optimisticOrders]);
 
-    // ... (Keep Identify Items Logic)
+    // ... (Keep Identify Items Logic, BUT USE combinedActiveOrders)
     const { myItems, otherItems } = useMemo(() => {
         const mine: OrderItem[] = [];
         const others: { item: OrderItem, owner: string }[] = [];
         const myOrderSet = new Set(myOrderNumbers);
         const currentNormName = customerName?.trim().toLowerCase();
 
-        const tableOrders = Array.isArray(allBranchOrders) 
-            ? allBranchOrders.filter(o => String(o.tableId) === String(table.id) && o.status !== 'cancelled' && o.status !== 'completed')
+        const tableOrders = Array.isArray(combinedActiveOrders) 
+            ? combinedActiveOrders.filter(o => String(o.tableId) === String(table.id) && o.status !== 'cancelled' && o.status !== 'completed')
             : [];
 
         tableOrders.forEach(order => {
@@ -408,7 +422,7 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
         });
 
         return { myItems: mine, otherItems: others };
-    }, [allBranchOrders, myOrderNumbers, isAuthenticated, customerName, table.id, lang, menuItems, t]);
+    }, [combinedActiveOrders, myOrderNumbers, isAuthenticated, customerName, table.id, lang, menuItems, t]);
 
     const myTotal = useMemo(() => {
         return myItems.reduce((sum, item) => sum + (item.finalPrice * item.quantity), 0);
@@ -602,9 +616,11 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
                     };
                 });
 
-                const newOrderNumber = await onPlaceOrder(itemsToSend, customerName);
-                if (newOrderNumber) {
-                    setMyOrderNumbers(prev => [...prev, newOrderNumber]);
+                const newOrder = await onPlaceOrder(itemsToSend, customerName);
+                if (newOrder) {
+                    setMyOrderNumbers(prev => [...prev, newOrder.orderNumber]);
+                    // Optimistic Update: Add new order to local state immediately
+                    setOptimisticOrders(prev => [...prev, newOrder]);
                 }
                 
                 setCartItems([]);
@@ -662,13 +678,13 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
     const cartTotalAmount = useMemo(() => cartItems.reduce((sum, i) => sum + (i.finalPrice * i.quantity), 0), [cartItems]);
     const totalCartItemsCount = useMemo(() => cartItems.reduce((sum, i) => sum + i.quantity, 0), [cartItems]);
 
-    // ... (Keep Order Status Logic)
+    // ... (Keep Order Status Logic, BUT USE combinedActiveOrders)
     const orderStatus = useMemo(() => {
         try {
             if (myItems.length === 0) return null;
-            if (!Array.isArray(allBranchOrders)) return null;
+            if (!Array.isArray(combinedActiveOrders)) return null;
 
-            const myTableOrders = allBranchOrders.filter(o => String(o.tableId) === String(table.id));
+            const myTableOrders = combinedActiveOrders.filter(o => String(o.tableId) === String(table.id));
             if (myTableOrders.length === 0) return { text: t('รอคิว'), color: 'bg-blue-600 text-white border-blue-700' };
 
             if (myTableOrders.some(o => o.status === 'cooking')) return { text: t('กำลังปรุง... 🍳'), color: 'bg-orange-500 text-white border-orange-600' };
@@ -676,7 +692,7 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
             const waitingOrders = myTableOrders.filter(o => o.status === 'waiting');
             if (waitingOrders.length > 0) {
                 const myEarliestOrderTime = Math.min(...waitingOrders.map(o => o.orderTime));
-                const queueCount = allBranchOrders.filter(o => (o.status === 'waiting' || o.status === 'cooking') && o.orderTime < myEarliestOrderTime).length;
+                const queueCount = combinedActiveOrders.filter(o => (o.status === 'waiting' || o.status === 'cooking') && o.orderTime < myEarliestOrderTime).length;
                 if (queueCount === 0) return { text: `${t('รอคิว')} (${t('คิวที่ 1')} ☝️)`, color: 'bg-blue-600 text-white border-blue-700' };
                 return { text: `${t('รอคิว...')} (${t('อีก')} ${queueCount} ${t('คิว')}) ⏳`, color: 'bg-blue-600 text-white border-blue-700' };
             }
@@ -687,7 +703,7 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
         } catch (e) {
             return myItems.length > 0 ? { text: t('รอคิว'), color: 'bg-blue-600 text-white border-blue-700' } : null;
         }
-    }, [allBranchOrders, isAuthenticated, table.id, myItems.length, t]);
+    }, [combinedActiveOrders, isAuthenticated, table.id, myItems.length, t]);
 
     // --- Loading Screen Render (MODIFIED) ---
     if (isLoadingScreen) {
