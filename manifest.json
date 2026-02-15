@@ -1,0 +1,18 @@
+{
+  "short_name": "POS",
+  "name": "ระบบจัดการร้านอาหาร (POS)",
+  "description": "แอปพลิเคชัน Point-of-Sale (POS) สำหรับร้านอาหารที่ช่วยให้สามารถจัดการเมนูและรับออเดอร์ได้อย่างง่ายดาย",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#D72828",
+  "background_color": "#f3f4f6"
+}

@@ -1,0 +1,115 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>ระบบจัดการร้านอาหาร (POS)</title>
+
+    <!-- iOS / PWA Support -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="POS System">
+    <link rel="apple-touch-icon" href="/icon.svg">
+
+    <!-- Android / PWA Support -->
+    <meta name="mobile-web-app-capable" content="yes">
+
+    <!-- Google Fonts: Sarabun -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- SweetAlert2 -->
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <!-- XLSX (SheetJS) for Excel Import/Export -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+    <!-- html2canvas for printing support -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#D72828">
+
+    <style>
+      body {
+        font-family: 'Sarabun', sans-serif;
+        /* Prevent pull-to-refresh on mobile to feel more like an app */
+        overscroll-behavior-y: none;
+      }
+      /* Hide scrollbar for all elements */
+      ::-webkit-scrollbar {
+        display: none;
+      }
+      * {
+        -ms-overflow-style: none;  /* IE and Edge */
+        scrollbar-width: none;  /* Firefox */
+      }
+      
+      /* Shimmer effect for loading placeholders */
+      @keyframes shimmer-animation {
+        0% {
+          background-position: -200% 0;
+        }
+        100% {
+          background-position: 200% 0;
+        }
+      }
+
+      .shimmer-effect {
+        animation: shimmer-animation 1.5s infinite linear;
+        background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+        background-size: 200% 100%;
+      }
+      /* ADDED for badge animation */
+      @keyframes pop-in {
+        0% { transform: scale(0.5); opacity: 0; }
+        70% { transform: scale(1.1); }
+        100% { transform: scale(1); opacity: 1; }
+      }
+      .animate-pop-in {
+        animation: pop-in 0.3s ease-out;
+      }
+    </style>
+
+<script type="importmap">
+{
+  "imports": {
+    "@/": "./",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "sweetalert2": "https://aistudiocdn.com/sweetalert2@^11.26.3",
+    "firebase/app": "https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js",
+    "firebase/firestore": "https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js",
+    "firebase/functions": "https://www.gstatic.com/firebasejs/9.22.1/firebase-functions-compat.js",
+    "firebase/messaging": "https://www.gstatic.com/firebasejs/9.22.1/firebase-messaging-compat.js",
+    "@google/genai": "https://esm.run/@google/genai",
+    "mqtt": "https://unpkg.com/mqtt@5.3.4/dist/mqtt.min.js",
+    "firebase/": "https://aistudiocdn.com/firebase@^12.6.0/",
+    "vite": "https://aistudiocdn.com/vite@^7.2.6",
+    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.1",
+    "path": "https://aistudiocdn.com/path@^0.12.7",
+    "url": "https://aistudiocdn.com/url@^0.11.4"
+  }
+}
+</script>
+<script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').then(registration => {
+          console.log('ServiceWorker registration successful with scope: ', registration.scope);
+        }, err => {
+          console.log('ServiceWorker registration failed: ', err);
+        });
+      });
+    }
+  </script>
+<link rel="stylesheet" href="/index.css">
+</head>
+<body class="bg-gray-100">
+    <div id="root"></div>
+<script type="module" src="/index.tsx"></script>
+</body>
+</html>

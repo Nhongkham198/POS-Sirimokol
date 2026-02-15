@@ -1,0 +1,20 @@
+
+{
+  "name": "pos-print-server",
+  "version": "1.0.0",
+  "description": "Simple Bridge Server for POS Printing (Network & USB)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "body-parser": "^1.20.2",
+    "iconv-lite": "^0.6.3",
+    "pngjs": "^7.0.0",
+    "escpos": "^3.0.0-alpha.6",
+    "escpos-usb": "^3.0.0-alpha.4",
+    "usb": "^1.7.1"
+  }
+}

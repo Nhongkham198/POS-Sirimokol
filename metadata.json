@@ -1,0 +1,5 @@
+{
+  "name": "ระบบจัดการร้านอาหาร-(Sirimonkol)",
+  "description": "แอปพลิเคชัน Point-of-Sale (POS) สำหรับร้านอาหารที่ช่วยให้สามารถจัดการเมนูและรับออเดอร์ได้อย่างง่ายดาย",
+  "requestFramePermissions": []
+}
