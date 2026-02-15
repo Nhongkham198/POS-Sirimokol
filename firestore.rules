@@ -2,9 +2,18 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     match /{document=**} {
-      // Allow read/write access for the next 30 days for development.
-      // After this period, you will need to set up proper security rules.
-      allow read, write: if request.time < timestamp.date(2024, 8, 27);
+      // ======================================================================
+      // DEVELOPER NOTE:
+      // You are seeing "Missing or insufficient permissions" because the
+      // default Firestore rules are too strict. This new rule will open
+      // access for development purposes.
+      //
+      // *** YOU MUST DEPLOY THIS FILE TO FIREBASE FOR THE FIX TO WORK. ***
+      //
+      // This rule allows anyone to read/write to your database until the end of 2025.
+      // For production, you must configure proper security rules.
+      // ======================================================================
+      allow read, write: if request.time < timestamp.date(2025, 12, 31);
     }
   }
 }
