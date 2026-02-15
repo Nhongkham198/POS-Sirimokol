@@ -141,24 +141,34 @@ export const ItemCustomizationModal: React.FC<ItemCustomizationModalProps> = ({ 
         
         const cartItemId = `${item.id}-${sortedOptionIds}-${notesIdentifier}-${takeawayIdentifier}`;
 
-        const itemToAdd: Partial<OrderItem> = {
-            ...item,
+        // CRITICAL FIX: Explicitly construct the entire object to avoid 'undefined' properties
+        // from optional fields in MenuItem that would cause silent Firestore write failures.
+        const itemToAdd: OrderItem = {
+            // MenuItem properties with defaults for optionals
+            id: item.id,
+            name: item.name,
+            nameEn: item.nameEn || '',
+            price: item.price,
+            category: item.category,
+            imageUrl: item.imageUrl,
+            cookingTime: item.cookingTime || 0,
+            optionGroups: item.optionGroups || [],
+            isAvailable: item.isAvailable !== false,
+            isVisible: item.isVisible !== false,
+
+            // OrderItem specific properties
             quantity: quantity,
             isTakeaway: isTakeaway,
             cartItemId: cartItemId,
             finalPrice: finalPrice,
             selectedOptions: selectedOptions,
             notes: notes.trim(),
+            takeawayCutlery: isTakeaway ? takeawayCutlery : [],
+            takeawayCutleryNotes: isTakeaway && takeawayCutlery.includes('other') ? takeawayCutleryNotes.trim() : ''
+            // originalOrderNumber is added later in App.tsx -> handlePlaceOrder
         };
         
-        if (isTakeaway) {
-            itemToAdd.takeawayCutlery = takeawayCutlery;
-            if (takeawayCutlery.includes('other')) {
-                itemToAdd.takeawayCutleryNotes = takeawayCutleryNotes.trim();
-            }
-        }
-        
-        onConfirm(itemToAdd as OrderItem);
+        onConfirm(itemToAdd);
     };
 
     if (!isOpen || !item) return null;
