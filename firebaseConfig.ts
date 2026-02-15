@@ -1,10 +1,10 @@
-
 // FIX: Updated Firebase imports to use the v9 compatibility layer, which provides the v8 namespaced API and fixes initialization errors.
 import firebase from "firebase/compat/app";
 import "firebase/compat/firestore";
 import "firebase/compat/functions";
 import "firebase/compat/storage"; // Import Storage
-import { getAnalytics } from "firebase/analytics";
+// FIX: Switched to v8 compat analytics to ensure consistent SDK usage.
+import "firebase/compat/analytics"; 
 
 // Updated configuration for 'pos-sirimonkol'
 const firebaseConfig = {
@@ -38,25 +38,12 @@ if (isFirebaseConfigured) {
       app = firebase.app();
     }
     
-    // Initialize Analytics if supported
-    if (typeof window !== 'undefined') {
-      try {
-        analytics = getAnalytics(app);
-      } catch (e) {
-        console.warn("Firebase Analytics failed to initialize", e);
-      }
-    }
-
-    db = firebase.firestore();
+    // ** DEFINITIVE FIX: Explicitly pass the initialized 'app' instance to ALL Firebase services **
+    // This resolves any ambiguity or context conflicts, especially with non-default regions.
     
-    // Removed experimentalForceLongPolling to fix "Detected an update time that is in the future" errors
-    // and clock skew issues. Defaulting to auto-detected transport (WebSockets/LongPolling).
-    
-    storage = firebase.storage(); // Initialize Storage
+    db = firebase.firestore(app);
     
     // --- ENABLE OFFLINE PERSISTENCE ---
-    // This allows the app to work offline by caching data locally.
-    // It acts as a local buffer, satisfying the requirement to store data locally before sending to Firebase.
     db.enablePersistence({ synchronizeTabs: true })
       .catch((err: any) => {
           if (err.code == 'failed-precondition') {
@@ -65,11 +52,24 @@ if (isFirebaseConfigured) {
               console.warn('Persistence failed: Browser not supported.');
           }
       });
+    
+    // Explicitly initialize other services with the 'app' context.
+    storage = firebase.storage(app); 
+    
+    // Also specify region for Functions to match Firestore Database location.
+    functions = firebase.functions(app, 'asia-southeast1');
 
-    functions = firebase.functions();
+    // Initialize Analytics if supported, also with the explicit 'app' context.
+    if (typeof window !== 'undefined') {
+      try {
+        analytics = firebase.analytics(app);
+      } catch (e) {
+        console.warn("Firebase Analytics failed to initialize", e);
+      }
+    }
+
   } catch (e) {
     console.error("Error initializing Firebase. Please check your config.", e);
-    // isFirebaseConfigured should remain true, but db will be null, and errors will be caught.
   }
 }
 

@@ -1,4 +1,3 @@
-
 import React from 'react';
 import type { MenuItem } from '../types';
 import { MenuItemImage } from './MenuItemImage';
@@ -92,10 +91,11 @@ export const MenuItemCard: React.FC<MenuItemCardProps> = ({
             </div>
 
             {isRecommended && (
-                <div className="absolute top-2 right-2 flex items-center justify-center w-9 h-9 z-20 pointer-events-none" title="เมนูแนะนำ">
-                    <div className="absolute w-full h-full bg-red-400/30 rounded-full animate-ping"></div>
-                    <div className="relative bg-white rounded-full p-1.5 shadow-lg border border-red-100 flex items-center justify-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-red-500 transform -rotate-12" viewBox="0 0 20 20" fill="currentColor">
+                <div className="absolute top-2 left-2 flex items-center justify-center w-10 h-10 z-20 pointer-events-none" title="เมนูแนะนำ">
+                    {/* Anime-like effect: Ping animation behind + Bounce animation on icon */}
+                    <div className="absolute w-full h-full bg-red-500/40 rounded-full animate-ping"></div>
+                    <div className="relative bg-white rounded-full p-1.5 shadow-lg border-2 border-red-500 flex items-center justify-center animate-bounce">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-red-600" viewBox="0 0 20 20" fill="currentColor">
                             <path d="M2 10.5a1.5 1.5 0 113 0v6a1.5 1.5 0 01-3 0v-6zM6 10.333v5.43a2 2 0 001.106 1.79l.05.025A4 4 0 008.943 18h5.416a2 2 0 001.962-1.608l1.2-6A2 2 0 0015.56 8H12V4a2 2 0 00-2-2 1 1 0 00-1 1v.667a4 4 0 01-.8 2.4L6.8 7.933a4 4 0 00-.8 2.4z" />
                         </svg>
                     </div>
