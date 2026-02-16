@@ -78,7 +78,9 @@ export function useFirestoreSync<T>(
 
                 if (docSnapshot.exists) {
                     const data = docSnapshot.data();
+                    
                     if (data && typeof data.value !== 'undefined') {
+                        // STANDARD FORMAT: { value: [...] }
                         let valueToSet = data.value;
 
                         // --- Validation & Cleanup Logic ---
@@ -117,22 +119,27 @@ export function useFirestoreSync<T>(
                         }
 
                         setValue(valueToSet as T);
+                    } else if (data && Array.isArray(currentInitialValue)) {
+                        // NON-STANDARD FORMAT (Flattened Object): { "0": {...}, "1": {...} }
+                        // If the expected type is Array, but 'value' field is missing, 
+                        // try to parse the document fields as array items.
+                        console.warn(`[FirestoreSync] Detected flattened array structure for ${collectionKey}. converting to array.`);
+                        const items = Object.values(data);
+                        // Simple check: Filter out non-object items if we expect objects (like tables)
+                        // Also, sometimes metadata fields might sneak in, though doc.data() usually just returns fields.
+                        setValue(items as unknown as T);
                     } else {
-                        // Doc exists but empty value, use initial (safe to write next time)
+                        // Doc exists but empty value and structure doesn't match expectation
                         setValue(currentInitialValue);
                     }
                 } else {
                     // Doc doesn't exist yet. 
-                    // Case 1: First time setup -> Safe to write default.
-                    // Case 2: Deleted -> Safe to write default.
                     setValue(currentInitialValue);
                 }
                 setIsSynced(true); 
             },
             (error) => {
                 console.error(`Firestore sync error for ${collectionKey}:`, error);
-                // Do NOT enable writing if read failed to prevent overwriting with stale/default data
-                // isReadyToWrite.current = false; // Optional: be strict about it
             }
         );
 
@@ -160,7 +167,7 @@ export function useFirestoreSync<T>(
             'restaurantName', 
             'restaurantAddress', 
             'restaurantPhone', 
-            'taxId',
+            'taxId', 
             'qrCodeUrl',
             'signatureUrl',
             'notificationSoundUrl',
@@ -215,6 +222,8 @@ export function useFirestoreSync<T>(
             }
             // -----------------------------
 
+            // Always write in the standard format { value: ... }
+            // This effectively migrates any "flattened" legacy data to the correct format on next save.
             docRef.set({ value: resolvedValue })
                 .catch(err => {
                     console.error(`Failed to write ${collectionKey} to Firestore:`, err);

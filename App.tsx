@@ -127,7 +127,10 @@ export const App: React.FC = () => {
     });
     const [isEditMode, setIsEditMode] = useState(false);
     const [isAdminSidebarCollapsed, setIsAdminSidebarCollapsed] = useState(false);
-    const [isOrderSidebarVisible, setIsOrderSidebarVisible] = useState(true);
+    
+    // Initialize Sidebar visibility based on device type. 
+    // Desktop: Visible by default. Mobile: Hidden by default (shown when cart clicked)
+    const [isOrderSidebarVisible, setIsOrderSidebarVisible] = useState(window.innerWidth >= 1024);
 
     const [isOrderNotificationsEnabled, setIsOrderNotificationsEnabled] = useState(() => {
         return localStorage.getItem('isOrderNotificationsEnabled') === 'true';
@@ -627,6 +630,121 @@ export const App: React.FC = () => {
         }
     };
 
+    // --- Table Management Handlers ---
+    const handleAddFloor = async () => {
+        const { value: floorName } = await Swal.fire({
+            title: 'เพิ่มชั้นใหม่',
+            input: 'text',
+            inputLabel: 'ชื่อชั้น (เช่น ชั้น 2, โซนสวน)',
+            showCancelButton: true,
+            inputValidator: (value) => {
+                if (!value) return 'กรุณากรอกชื่อชั้น';
+                if (floors.includes(value)) return 'ชื่อชั้นนี้มีอยู่แล้ว';
+            }
+        });
+
+        if (floorName) {
+            setFloors(prev => [...prev, floorName]);
+            setSelectedSidebarFloor(floorName);
+        }
+    };
+
+    const handleRemoveFloor = (floor: string) => {
+        const tablesOnFloor = tables.filter(t => t.floor === floor);
+        if (tablesOnFloor.length > 0) {
+            Swal.fire('ไม่สามารถลบได้', `ยังมีโต๊ะอยู่ใน ${floor} กรุณาลบโต๊ะออกก่อน`, 'warning');
+            return;
+        }
+        
+        Swal.fire({
+            title: `ลบชั้น "${floor}"?`,
+            text: "คุณแน่ใจหรือไม่?",
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#d33',
+            confirmButtonText: 'ลบเลย'
+        }).then((result) => {
+            if (result.isConfirmed) {
+                setFloors(prev => {
+                    const newFloors = prev.filter(f => f !== floor);
+                    if (selectedSidebarFloor === floor && newFloors.length > 0) {
+                        setSelectedSidebarFloor(newFloors[0]);
+                    } else if (newFloors.length === 0) {
+                        setSelectedSidebarFloor('');
+                    }
+                    return newFloors;
+                });
+            }
+        });
+    };
+
+    const handleAddNewTable = async (floor: string) => {
+        if (!floor) return;
+        
+        // Auto-generate name suggestion
+        const tablesOnFloor = tables.filter(t => t.floor === floor);
+        const existingNums = tablesOnFloor.map(t => {
+            const match = t.name.match(/\d+/);
+            return match ? parseInt(match[0]) : 0;
+        });
+        const maxNum = existingNums.length > 0 ? Math.max(...existingNums) : 0;
+        const defaultName = `T${maxNum + 1}`;
+
+        const { value: tableName } = await Swal.fire({
+            title: 'เพิ่มโต๊ะใหม่',
+            input: 'text',
+            inputLabel: `ชื่อโต๊ะ (สำหรับ ${floor})`,
+            inputValue: defaultName,
+            showCancelButton: true,
+            inputValidator: (value) => {
+                if (!value) return 'กรุณากรอกชื่อโต๊ะ';
+                if (tables.some(t => t.name === value && t.floor === floor)) return 'ชื่อโต๊ะนี้มีอยู่แล้วในชั้นนี้';
+            }
+        });
+
+        if (tableName) {
+            setTables(prev => {
+                const maxId = prev.length > 0 ? Math.max(...prev.map(t => t.id)) : 0;
+                return [...prev, { 
+                    id: maxId + 1, 
+                    name: tableName, 
+                    floor: floor, 
+                    activePin: null, 
+                    reservation: null 
+                }];
+            });
+        }
+    };
+
+    const handleRemoveLastTable = (floor: string) => {
+        const tablesOnFloor = tables.filter(t => t.floor === floor);
+        if (tablesOnFloor.length === 0) return;
+
+        // Sort by ID descending to get the last created one usually, or highest number in name
+        // Let's assume highest ID is the most recent.
+        const lastTable = tablesOnFloor.sort((a, b) => b.id - a.id)[0];
+
+        // Check active orders
+        const isOccupied = activeOrders.some(o => o.tableId === lastTable.id && o.status !== 'completed' && o.status !== 'cancelled');
+        if (isOccupied) {
+             Swal.fire('ไม่สามารถลบได้', `โต๊ะ ${lastTable.name} กำลังใช้งานอยู่`, 'warning');
+             return;
+        }
+
+        Swal.fire({
+            title: `ลบโต๊ะ ${lastTable.name}?`,
+            text: 'คุณแน่ใจหรือไม่?',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#d33',
+            confirmButtonText: 'ลบเลย'
+        }).then((result) => {
+            if (result.isConfirmed) {
+                setTables(prev => prev.filter(t => t.id !== lastTable.id));
+            }
+        });
+    };
+
     // --- RENDER LOGIC ---
     // GLOBAL LOADING: If critical data isn't synced yet, show loading
     const isCriticalDataSynced = isUsersSynced && isBranchesSynced && isMenuSynced && isTablesSynced;
@@ -727,7 +845,7 @@ export const App: React.FC = () => {
                 )}
                 
                 <main className={`flex-1 flex overflow-hidden ${!isDesktop ? 'pb-16' : ''}`}>
-                    {currentView === 'pos' && isDesktop && (
+                    {currentView === 'pos' && (
                         <div className="flex-1 flex overflow-hidden relative">
                             <div className="flex-1 overflow-y-auto">
                                 <Menu 
@@ -745,55 +863,138 @@ export const App: React.FC = () => {
                                     onImportMenu={() => {}} 
                                     recommendedMenuItemIds={recommendedMenuItemIds} 
                                     onToggleVisibility={handleToggleAvailability}
-                                    onToggleOrderSidebar={() => setIsOrderSidebarVisible(!isOrderSidebarVisible)}
+                                    onToggleOrderSidebar={isDesktop ? () => setIsOrderSidebarVisible(!isOrderSidebarVisible) : undefined}
                                     isOrderSidebarVisible={isOrderSidebarVisible}
                                     cartItemCount={totalCartItemCount}
                                 />
                             </div>
-                            <aside className={`flex-shrink-0 transition-all duration-300 overflow-hidden ${isOrderSidebarVisible ? 'w-96' : 'w-0'}`}>
-                                {isOrderSidebarVisible && (
-                                    <Sidebar
-                                        currentOrderItems={currentOrderItems}
-                                        onQuantityChange={(id, qty) => {
-                                            setCurrentOrderItems(prev => prev.map(item => item.cartItemId === id ? { ...item, quantity: qty } : item).filter(i => i.quantity > 0));
-                                        }}
-                                        onRemoveItem={(id) => setCurrentOrderItems(prev => prev.filter(i => i.cartItemId !== id))}
-                                        onClearOrder={() => setCurrentOrderItems([])}
-                                        onPlaceOrder={() => { /* Logic */ }}
-                                        isPlacingOrder={isPlacingOrder}
-                                        tables={tables}
-                                        selectedTable={tables.find(t => t.id === selectedTableId) || null}
-                                        onSelectTable={setSelectedTableId}
-                                        customerName={customerName}
-                                        onCustomerNameChange={setCustomerName}
-                                        customerCount={customerCount}
-                                        onCustomerCountChange={setCustomerCount}
-                                        isEditMode={isEditMode}
-                                        onAddNewTable={() => {}}
-                                        onRemoveLastTable={() => {}}
-                                        floors={floors}
-                                        selectedFloor={selectedSidebarFloor}
-                                        onFloorChange={setSelectedSidebarFloor}
-                                        onAddFloor={() => {}}
-                                        onRemoveFloor={() => {}}
-                                        sendToKitchen={sendToKitchen}
-                                        onSendToKitchenChange={(val, details) => { setSendToKitchen(val); setNotSentToKitchenDetails(details); }}
-                                        onUpdateReservation={() => {}}
-                                        onOpenSearch={() => setModalState(prev => ({ ...prev, isMenuSearch: true }))}
-                                        currentUser={currentUser}
-                                        onEditOrderItem={(item) => { setOrderItemToEdit(item); setModalState(prev => ({ ...prev, isCustomization: true })); }}
-                                        onViewChange={setCurrentView}
-                                        restaurantName={restaurantName}
-                                        onLogout={handleLogout}
-                                        onToggleAvailability={handleToggleAvailability}
-                                        isOrderNotificationsEnabled={isOrderNotificationsEnabled}
-                                        onToggleOrderNotifications={toggleOrderNotifications}
-                                        deliveryProviders={deliveryProviders}
-                                        onToggleEditMode={() => setIsEditMode(!isEditMode)}
-                                        onOpenSettings={() => setModalState(prev => ({ ...prev, isSettings: true }))}
-                                    />
-                                )}
-                            </aside>
+                            
+                            {/* Desktop Sidebar (Side Panel) */}
+                            {isDesktop && (
+                                <aside className={`flex-shrink-0 transition-all duration-300 overflow-hidden ${isOrderSidebarVisible ? 'w-96' : 'w-0'}`}>
+                                    {isOrderSidebarVisible && (
+                                        <Sidebar
+                                            currentOrderItems={currentOrderItems}
+                                            onQuantityChange={(id, qty) => {
+                                                setCurrentOrderItems(prev => prev.map(item => item.cartItemId === id ? { ...item, quantity: qty } : item).filter(i => i.quantity > 0));
+                                            }}
+                                            onRemoveItem={(id) => setCurrentOrderItems(prev => prev.filter(i => i.cartItemId !== id))}
+                                            onClearOrder={() => setCurrentOrderItems([])}
+                                            onPlaceOrder={() => { /* Logic */ }}
+                                            isPlacingOrder={isPlacingOrder}
+                                            tables={tables}
+                                            selectedTable={tables.find(t => t.id === selectedTableId) || null}
+                                            onSelectTable={setSelectedTableId}
+                                            customerName={customerName}
+                                            onCustomerNameChange={setCustomerName}
+                                            customerCount={customerCount}
+                                            onCustomerCountChange={setCustomerCount}
+                                            isEditMode={isEditMode}
+                                            onAddNewTable={handleAddNewTable}
+                                            onRemoveLastTable={handleRemoveLastTable}
+                                            floors={floors}
+                                            selectedFloor={selectedSidebarFloor}
+                                            onFloorChange={setSelectedSidebarFloor}
+                                            onAddFloor={handleAddFloor}
+                                            onRemoveFloor={handleRemoveFloor}
+                                            sendToKitchen={sendToKitchen}
+                                            onSendToKitchenChange={(val, details) => { setSendToKitchen(val); setNotSentToKitchenDetails(details); }}
+                                            onUpdateReservation={() => {}}
+                                            onOpenSearch={() => setModalState(prev => ({ ...prev, isMenuSearch: true }))}
+                                            currentUser={currentUser}
+                                            onEditOrderItem={(item) => { setOrderItemToEdit(item); setModalState(prev => ({ ...prev, isCustomization: true })); }}
+                                            onViewChange={setCurrentView}
+                                            restaurantName={restaurantName}
+                                            onLogout={handleLogout}
+                                            onToggleAvailability={handleToggleAvailability}
+                                            isOrderNotificationsEnabled={isOrderNotificationsEnabled}
+                                            onToggleOrderNotifications={toggleOrderNotifications}
+                                            deliveryProviders={deliveryProviders}
+                                            onToggleEditMode={() => setIsEditMode(!isEditMode)}
+                                            onOpenSettings={() => setModalState(prev => ({ ...prev, isSettings: true }))}
+                                        />
+                                    )}
+                                </aside>
+                            )}
+
+                            {/* Mobile Sidebar (Overlay) */}
+                            {!isDesktop && isOrderSidebarVisible && (
+                                <div className="fixed inset-0 z-50 bg-gray-900 flex flex-col animate-slide-up">
+                                    <div className="p-3 bg-gray-800 border-b border-gray-700 flex justify-between items-center text-white shrink-0">
+                                        <h2 className="font-bold text-lg flex items-center gap-2">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+                                            รายการที่เลือก ({totalCartItemCount})
+                                        </h2>
+                                        <button onClick={() => setIsOrderSidebarVisible(false)} className="p-2 bg-gray-700 rounded-full hover:bg-gray-600 text-white">
+                                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                                        </button>
+                                    </div>
+                                    <div className="flex-1 overflow-hidden">
+                                        <Sidebar
+                                            currentOrderItems={currentOrderItems}
+                                            onQuantityChange={(id, qty) => {
+                                                setCurrentOrderItems(prev => prev.map(item => item.cartItemId === id ? { ...item, quantity: qty } : item).filter(i => i.quantity > 0));
+                                            }}
+                                            onRemoveItem={(id) => setCurrentOrderItems(prev => prev.filter(i => i.cartItemId !== id))}
+                                            onClearOrder={() => setCurrentOrderItems([])}
+                                            onPlaceOrder={() => { /* Logic */ }}
+                                            isPlacingOrder={isPlacingOrder}
+                                            tables={tables}
+                                            selectedTable={tables.find(t => t.id === selectedTableId) || null}
+                                            onSelectTable={setSelectedTableId}
+                                            customerName={customerName}
+                                            onCustomerNameChange={setCustomerName}
+                                            customerCount={customerCount}
+                                            onCustomerCountChange={setCustomerCount}
+                                            isEditMode={isEditMode}
+                                            onAddNewTable={handleAddNewTable}
+                                            onRemoveLastTable={handleRemoveLastTable}
+                                            floors={floors}
+                                            selectedFloor={selectedSidebarFloor}
+                                            onFloorChange={setSelectedSidebarFloor}
+                                            onAddFloor={handleAddFloor}
+                                            onRemoveFloor={handleRemoveFloor}
+                                            sendToKitchen={sendToKitchen}
+                                            onSendToKitchenChange={(val, details) => { setSendToKitchen(val); setNotSentToKitchenDetails(details); }}
+                                            onUpdateReservation={() => {}}
+                                            onOpenSearch={() => setModalState(prev => ({ ...prev, isMenuSearch: true }))}
+                                            currentUser={currentUser}
+                                            onEditOrderItem={(item) => { setOrderItemToEdit(item); setModalState(prev => ({ ...prev, isCustomization: true })); }}
+                                            onViewChange={setCurrentView}
+                                            restaurantName={restaurantName}
+                                            onLogout={handleLogout}
+                                            onToggleAvailability={handleToggleAvailability}
+                                            isOrderNotificationsEnabled={isOrderNotificationsEnabled}
+                                            onToggleOrderNotifications={toggleOrderNotifications}
+                                            deliveryProviders={deliveryProviders}
+                                            onToggleEditMode={() => setIsEditMode(!isEditMode)}
+                                            onOpenSettings={() => setModalState(prev => ({ ...prev, isSettings: true }))}
+                                            isMobilePage={true}
+                                        />
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Mobile Floating Cart Button */}
+                            {!isDesktop && !isOrderSidebarVisible && totalCartItemCount > 0 && (
+                                <div className="absolute bottom-4 left-4 right-4 z-30">
+                                    <button 
+                                        onClick={() => setIsOrderSidebarVisible(true)}
+                                        className="w-full bg-blue-600 text-white shadow-xl rounded-xl p-4 flex justify-between items-center animate-bounce-in"
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <span className="bg-white text-blue-600 font-bold w-8 h-8 rounded-full flex items-center justify-center text-lg">{totalCartItemCount}</span>
+                                            <div className="text-left leading-tight">
+                                                <span className="font-bold text-lg block">ดูรายการ</span>
+                                                <span className="text-xs font-light text-blue-100">แตะเพื่อสรุปยอด</span>
+                                            </div>
+                                        </div>
+                                        <span className="font-bold text-xl">
+                                            {currentOrderItems.reduce((acc, item) => acc + item.finalPrice * item.quantity, 0).toLocaleString()} ฿
+                                        </span>
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     )}
                     {currentView === 'kitchen' && (
