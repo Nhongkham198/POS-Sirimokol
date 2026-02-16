@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
 import Swal from 'sweetalert2';
 import type { Table, MenuItem, ActiveOrder, CompletedOrder, OrderItem } from '../types';
@@ -77,7 +78,7 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
             });
             toast.fire({
                 icon: 'success',
-                title: `Added ${item.name}`
+                title: `เพิ่ม ${item.name} แล้ว`
             });
         }
     };
@@ -206,6 +207,18 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
                 </button>
             </header>
 
+            {/* Customer Name Input (Optional) */}
+            <div className="bg-blue-50 px-4 py-2 border-b border-blue-100 flex items-center gap-2">
+                <span className="text-sm text-blue-700 font-medium whitespace-nowrap">ชื่อของคุณ:</span>
+                <input 
+                    type="text" 
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                    placeholder="(ระบุชื่อเพื่อให้เสิร์ฟถูกต้อง)"
+                    className="w-full bg-white border border-blue-200 rounded px-2 py-1 text-sm focus:outline-none focus:border-blue-400 text-gray-700"
+                />
+            </div>
+
             {/* Categories */}
             <div className="bg-white border-b border-gray-100 py-2">
                 <div className="flex overflow-x-auto gap-2 px-4 hide-scrollbar">
@@ -279,6 +292,18 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                                 </svg>
                             </button>
+                        </div>
+
+                        {/* Customer Name Input in Cart */}
+                        <div className="bg-gray-800 p-4 rounded-xl mb-4 border border-gray-700">
+                            <label className="block text-gray-400 text-sm mb-2">ชื่อผู้สั่ง (Optional)</label>
+                            <input 
+                                type="text" 
+                                value={customerName}
+                                onChange={(e) => setCustomerName(e.target.value)}
+                                placeholder="ใส่ชื่อเล่น..."
+                                className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white focus:outline-none focus:border-blue-500"
+                            />
                         </div>
 
                         {cartItems.map((item, idx) => (
