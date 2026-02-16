@@ -42,13 +42,19 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
     const [myOrderNumbers, setMyOrderNumbers] = useState<number[]>([]);
     const [optimisticOrders, setOptimisticOrders] = useState<ActiveOrder[]>([]);
 
-    // State for Sticky Thank You Screen
-    const [isThankYouScreenVisible, setIsThankYouScreenVisible] = useState(false);
+    // --- LOGIC: Sticky Thank You Screen Keys ---
+    const STORAGE_KEY = `pos_thankyou_lock_table_${table.id}`;
+    const CALL_COOLDOWN_KEY = `pos_call_cooldown_table_${table.id}`;
+
+    // State for Sticky Thank You Screen - Initialize from localStorage to prevent flash on refresh
+    const [isThankYouScreenVisible, setIsThankYouScreenVisible] = useState(() => {
+        return !!localStorage.getItem(STORAGE_KEY);
+    });
     
     // Cooldown State for Staff Call
     const [callCooldown, setCallCooldown] = useState(0);
 
-    // Ref to ignore history checks on a fresh scan
+    // Ref to ignore history checks only when manually starting a new session
     const ignoreHistoryRef = useRef(false);
 
     // Simple translation helper placeholder
@@ -82,45 +88,8 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
         return items;
     }, [menuItems, selectedCategory]);
 
-    // --- LOGIC: Sticky Thank You Screen ---
-    const STORAGE_KEY = `pos_thankyou_lock_table_${table.id}`;
-    const CALL_COOLDOWN_KEY = `pos_call_cooldown_table_${table.id}`;
-
-    // 1. Smart Detection: Refresh vs New Scan
+    // 1. Initialize Call Cooldown on Mount
     useEffect(() => {
-        // This runs only once on mount
-        try {
-            // Check Navigation Timing to see if this is a Reload or a Navigate (Link/QR)
-            const navEntries = performance.getEntriesByType("navigation");
-            if (navEntries.length > 0) {
-                const navType = (navEntries[0] as PerformanceNavigationTiming).type;
-                
-                if (navType === 'navigate') {
-                    // CASE: New QR Scan or First Load
-                    // Force CLEAR the lock to allow new ordering
-                    localStorage.removeItem(STORAGE_KEY);
-                    setIsThankYouScreenVisible(false);
-                    ignoreHistoryRef.current = true; // Tell the effect below to ignore recent history for a moment
-                } else if (navType === 'reload') {
-                    // CASE: Refresh
-                    // Do nothing, let the persistence logic handle it (keep locked if locked)
-                    const lockedState = localStorage.getItem(STORAGE_KEY);
-                    if (lockedState) {
-                        setIsThankYouScreenVisible(true);
-                    }
-                }
-            } else {
-                // Fallback for browsers without performance API
-                const lockedState = localStorage.getItem(STORAGE_KEY);
-                if (lockedState) setIsThankYouScreenVisible(true);
-            }
-        } catch (e) {
-            // Fallback
-            const lockedState = localStorage.getItem(STORAGE_KEY);
-            if (lockedState) setIsThankYouScreenVisible(true);
-        }
-
-        // Check Call Cooldown on Mount
         const lastCallTime = localStorage.getItem(CALL_COOLDOWN_KEY);
         if (lastCallTime) {
             const timePassed = Date.now() - parseInt(lastCallTime, 10);
@@ -129,7 +98,7 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
                 setCallCooldown(Math.ceil((cooldownTime - timePassed) / 1000));
             }
         }
-    }, [STORAGE_KEY, CALL_COOLDOWN_KEY]);
+    }, [CALL_COOLDOWN_KEY]);
 
     // Timer for Cooldown
     useEffect(() => {
@@ -145,8 +114,16 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
     useEffect(() => {
         const hasActive = myActiveOrders.length > 0;
         
-        if (!hasActive) {
-            // Only check for completion if we haven't explicitly ignored history (via new scan)
+        if (hasActive) {
+            // If active orders exist (Staff opened new bill or currently ordering), Unlock immediately
+            if (isThankYouScreenVisible) {
+                localStorage.removeItem(STORAGE_KEY);
+                setIsThankYouScreenVisible(false);
+                ignoreHistoryRef.current = false; // Reset ignore flag
+            }
+        } else {
+            // No active orders. Check if we should lock.
+            // Only check for completion if we haven't explicitly ignored history (via manual new session)
             if (!ignoreHistoryRef.current) {
                 // Check if there is a completed order for this table in the last 5 minutes
                 const recentCompleted = completedOrders.find(o => 
@@ -155,18 +132,19 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
                 );
 
                 if (recentCompleted) {
-                    // Set Sticky State
-                    localStorage.setItem(STORAGE_KEY, 'true');
-                    setIsThankYouScreenVisible(true);
-                    setCartItems([]); 
+                    // Set Sticky State if not already set
+                    if (!isThankYouScreenVisible) {
+                        localStorage.setItem(STORAGE_KEY, 'true');
+                        setIsThankYouScreenVisible(true);
+                        setCartItems([]); 
+                    }
+                } else {
+                    // No active order AND No recent completed order (Time expired) -> Unlock
+                    if (isThankYouScreenVisible) {
+                        localStorage.removeItem(STORAGE_KEY);
+                        setIsThankYouScreenVisible(false);
+                    }
                 }
-            }
-        } else {
-            // If active orders exist (Staff opened new bill), Unlock immediately
-            if (isThankYouScreenVisible) {
-                localStorage.removeItem(STORAGE_KEY);
-                setIsThankYouScreenVisible(false);
-                ignoreHistoryRef.current = false; // Reset ignore flag
             }
         }
     }, [myActiveOrders, completedOrders, table.id, isThankYouScreenVisible, STORAGE_KEY]);
@@ -176,7 +154,7 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
         localStorage.removeItem(STORAGE_KEY);
         setIsThankYouScreenVisible(false);
         setCartItems([]);
-        ignoreHistoryRef.current = true; // Prevent re-locking from history
+        ignoreHistoryRef.current = true; // Prevent re-locking from history for this session
     };
 
 
