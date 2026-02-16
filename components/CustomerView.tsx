@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import Swal from 'sweetalert2';
 import type { Table, MenuItem, ActiveOrder, CompletedOrder, OrderItem } from '../types';
 import { MenuItemImage } from './MenuItemImage';
@@ -38,9 +38,15 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
     const [itemToCustomize, setItemToCustomize] = useState<MenuItem | null>(null);
     const [customerName, setCustomerName] = useState('');
     
-    // To track orders placed by this session (simple local storage or state if persistent)
+    // To track orders placed by this session
     const [myOrderNumbers, setMyOrderNumbers] = useState<number[]>([]);
     const [optimisticOrders, setOptimisticOrders] = useState<ActiveOrder[]>([]);
+
+    // State for Sticky Thank You Screen
+    const [isThankYouScreenVisible, setIsThankYouScreenVisible] = useState(false);
+    
+    // Ref to ignore history checks on a fresh scan
+    const ignoreHistoryRef = useRef(false);
 
     // Simple translation helper placeholder
     const t = (s: string) => s;
@@ -55,9 +61,6 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
             const orderSub = order.items.reduce((s, i) => s + (i.finalPrice * i.quantity), 0);
             return sum + orderSub + order.taxAmount;
         }, 0);
-        
-        // Also consider completed orders if needed (though usually they leave after paying)
-        // For simplicity, we just show active bill pending payment
         return activeTotal;
     }, [myActiveOrders]);
 
@@ -76,42 +79,81 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
         return items;
     }, [menuItems, selectedCategory]);
 
-    // Check for payment completion (Auto Exit)
+    // --- LOGIC: Sticky Thank You Screen ---
+    const STORAGE_KEY = `pos_thankyou_lock_table_${table.id}`;
+
+    // 1. Smart Detection: Refresh vs New Scan
     useEffect(() => {
-        // Condition: Table WAS active (has history of orders) but now has NO active orders, 
-        // AND there is a very recent completed order for this table (e.g. within last minute)
-        // This prevents the "Thank You" screen from showing immediately if they just sat down at an empty table.
-        
+        // This runs only once on mount
+        try {
+            // Check Navigation Timing to see if this is a Reload or a Navigate (Link/QR)
+            const navEntries = performance.getEntriesByType("navigation");
+            if (navEntries.length > 0) {
+                const navType = (navEntries[0] as PerformanceNavigationTiming).type;
+                
+                if (navType === 'navigate') {
+                    // CASE: New QR Scan or First Load
+                    // Force CLEAR the lock to allow new ordering
+                    localStorage.removeItem(STORAGE_KEY);
+                    setIsThankYouScreenVisible(false);
+                    ignoreHistoryRef.current = true; // Tell the effect below to ignore recent history for a moment
+                } else if (navType === 'reload') {
+                    // CASE: Refresh
+                    // Do nothing, let the persistence logic handle it (keep locked if locked)
+                    const lockedState = localStorage.getItem(STORAGE_KEY);
+                    if (lockedState) {
+                        setIsThankYouScreenVisible(true);
+                    }
+                }
+            } else {
+                // Fallback for browsers without performance API
+                const lockedState = localStorage.getItem(STORAGE_KEY);
+                if (lockedState) setIsThankYouScreenVisible(true);
+            }
+        } catch (e) {
+            // Fallback
+            const lockedState = localStorage.getItem(STORAGE_KEY);
+            if (lockedState) setIsThankYouScreenVisible(true);
+        }
+    }, [STORAGE_KEY]);
+
+    // 2. Detect Payment Completion & Manage Lock State
+    useEffect(() => {
         const hasActive = myActiveOrders.length > 0;
         
         if (!hasActive) {
-            // Check if there is a completed order for this table in the last 60 seconds
-            const recentCompleted = completedOrders.find(o => 
-                o.tableId === table.id && 
-                (Date.now() - o.completionTime) < 60000 // 1 minute window
-            );
+            // Only check for completion if we haven't explicitly ignored history (via new scan)
+            if (!ignoreHistoryRef.current) {
+                // Check if there is a completed order for this table in the last 5 minutes
+                const recentCompleted = completedOrders.find(o => 
+                    o.tableId === table.id && 
+                    (Date.now() - o.completionTime) < 300000 // 5 minutes window
+                );
 
-            if (recentCompleted) {
-                Swal.fire({
-                    icon: 'success',
-                    title: 'ขอบคุณที่ใช้บริการ',
-                    text: 'การชำระเงินเสร็จสิ้นแล้ว หวังว่าจะได้ให้บริการท่านอีกครั้ง',
-                    allowOutsideClick: false,
-                    allowEscapeKey: false,
-                    confirmButtonText: 'ปิดหน้าต่าง',
-                    backdrop: `
-                        rgba(0,0,123,0.4)
-                        url("/images/nyan-cat.gif")
-                        left top
-                        no-repeat
-                    `
-                }).then(() => {
-                    // Close window if possible, or reload to clear state (simulating exit)
-                    window.location.reload(); 
-                });
+                if (recentCompleted) {
+                    // Set Sticky State
+                    localStorage.setItem(STORAGE_KEY, 'true');
+                    setIsThankYouScreenVisible(true);
+                    setCartItems([]); 
+                }
+            }
+        } else {
+            // If active orders exist (Staff opened new bill), Unlock immediately
+            if (isThankYouScreenVisible) {
+                localStorage.removeItem(STORAGE_KEY);
+                setIsThankYouScreenVisible(false);
+                ignoreHistoryRef.current = false; // Reset ignore flag
             }
         }
-    }, [myActiveOrders, completedOrders, table.id]);
+    }, [myActiveOrders, completedOrders, table.id, isThankYouScreenVisible, STORAGE_KEY]);
+
+    const handleNewSession = () => {
+        // Manual override to start new order
+        localStorage.removeItem(STORAGE_KEY);
+        setIsThankYouScreenVisible(false);
+        setCartItems([]);
+        ignoreHistoryRef.current = true; // Prevent re-locking from history
+    };
 
 
     const handleAddToCart = (item: MenuItem) => {
@@ -210,7 +252,6 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
         });
     };
 
-    // The function provided in the snippet, integrated here
     const handleSubmitOrder = async () => {
         if (cartItems.length === 0) return;
 
@@ -228,24 +269,20 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
             Swal.fire({ title: t('กำลังส่งรายการ...'), allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
 
             try {
-                // CRITICAL FIX: Revert names to Thai and ensure no 'undefined' values before sending to backend.
+                // Prepare items correctly
                 const itemsToSend = cartItems.map(cartItem => {
                     const originalItem = menuItems.find(m => m.id === cartItem.id);
                     return {
                         ...cartItem,
-                        // Revert main name to original (Thai)
                         name: originalItem ? originalItem.name : cartItem.name,
-                        // Safely revert english name, defaulting to empty string
                         nameEn: originalItem?.nameEn || '',
-                        
-                        // Also revert names within selected options
                         selectedOptions: cartItem.selectedOptions.map(opt => {
                             const originalGroup = originalItem?.optionGroups?.find(g => g.options.some(o => o.id === opt.id));
                             const originalOpt = originalGroup?.options.find(o => o.id === opt.id);
                             return {
                                 ...opt,
                                 name: originalOpt ? originalOpt.name : opt.name,
-                                nameEn: originalOpt?.nameEn || '' // Safety fix for options
+                                nameEn: originalOpt?.nameEn || ''
                             };
                         })
                     };
@@ -254,13 +291,11 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
                 const newOrder = await onPlaceOrder(itemsToSend, customerName);
                 if (newOrder) {
                     setMyOrderNumbers(prev => [...prev, newOrder.orderNumber]);
-                    // Optimistic Update: Add new order to local state immediately
                     setOptimisticOrders(prev => [...prev, newOrder]);
                     
                     setCartItems([]);
                     setIsCartOpen(false);
 
-                    // SHOW QUEUE NUMBER TO CUSTOMER
                     const orderNumDisplay = String(newOrder.orderNumber).padStart(2, '0');
                     await Swal.fire({ 
                         icon: 'success', 
@@ -270,7 +305,6 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
                         showConfirmButton: false 
                     });
                 } else {
-                     // Fallback if no order returned (should rarely happen)
                      setCartItems([]);
                      setIsCartOpen(false);
                      await Swal.fire({ icon: 'success', title: t('สั่งอาหารสำเร็จ!'), text: t('รายการอาหารถูกส่งเข้าครัวแล้ว'), timer: 2500, showConfirmButton: false });
@@ -283,6 +317,37 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
     };
 
     const cartTotal = cartItems.reduce((acc, item) => acc + (item.finalPrice * item.quantity), 0);
+
+    // --- RENDER: THANK YOU SCREEN (Sticky) ---
+    if (isThankYouScreenVisible) {
+        return (
+            <div className="fixed inset-0 bg-white z-[9999] flex flex-col items-center justify-center p-6 text-center animate-fade-in">
+                <div className="w-24 h-24 bg-green-100 rounded-full flex items-center justify-center mb-6 animate-pop-in">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-14 w-14 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                </div>
+                <h1 className="text-3xl font-bold text-gray-800 mb-2">ขอบคุณที่ใช้บริการ</h1>
+                <p className="text-lg text-gray-600 mb-2">การชำระเงินเสร็จสมบูรณ์</p>
+                <p className="text-sm text-gray-400 mb-8">(หน้าจอจะค้างหน้านี้จนกว่าจะสแกนใหม่)</p>
+                
+                <div className="bg-gray-50 p-6 rounded-2xl w-full max-w-sm border border-gray-100 shadow-inner mb-10">
+                    {logoUrl && <img src={logoUrl} alt="Logo" className="h-12 mx-auto mb-3 object-contain" />}
+                    <p className="font-bold text-gray-800 text-lg">{restaurantName}</p>
+                    <p className="text-sm text-gray-500 mt-1">หวังว่าจะได้ให้บริการท่านอีกครั้ง</p>
+                </div>
+
+                <div className="absolute bottom-10 w-full px-6 opacity-30 hover:opacity-100 transition-opacity">
+                    <button 
+                        onClick={handleNewSession}
+                        className="text-gray-400 text-sm hover:text-gray-600 underline"
+                    >
+                        เริ่มรายการใหม่ (Manual Reset)
+                    </button>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="flex flex-col h-screen bg-gray-50 overflow-hidden">

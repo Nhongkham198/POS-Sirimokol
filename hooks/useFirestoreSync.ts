@@ -127,7 +127,7 @@ export function useFirestoreSync<T>(
                         const items = Object.values(data);
                         // Simple check: Filter out non-object items if we expect objects (like tables)
                         // Also, sometimes metadata fields might sneak in, though doc.data() usually just returns fields.
-                        setValue(items as unknown as T);
+                        setValue(items as any as T);
                     } else {
                         // Doc exists but empty value and structure doesn't match expectation
                         setValue(currentInitialValue);
@@ -168,7 +168,7 @@ export function useFirestoreSync<T>(
             'restaurantAddress', 
             'restaurantPhone', 
             'taxId', 
-            'qrCodeUrl',
+            'qrCodeUrl', 
             'signatureUrl',
             'notificationSoundUrl',
             'staffCallSoundUrl'

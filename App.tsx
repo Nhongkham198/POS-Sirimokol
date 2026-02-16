@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useRef, Suspense, useCallback } from 'react';
 import Swal from 'sweetalert2';
 import { useFirestoreSync, useFirestoreCollection } from './hooks/useFirestoreSync';
@@ -219,7 +220,7 @@ export const App: React.FC = () => {
     const [categories, setCategories] = useFirestoreSync<string[]>(branchId, 'categories', DEFAULT_CATEGORIES);
     const [tables, setTables, isTablesSynced] = useFirestoreSync<Table[]>(branchId, 'tables', DEFAULT_TABLES);
     const [floors, setFloors] = useFirestoreSync<string[]>(branchId, 'floors', DEFAULT_FLOORS);
-    const [recommendedMenuItemIds, setRecommendedMenuItemIds] = useFirestoreSync<number[]>(branchId, 'recommendedMenuItemIds', []);
+    const [recommendedMenuItemIds, setRecommendedMenuItemIds] = useFirestoreSync<number[]>(branchId, 'recommendedMenuItemIds', [] as number[]);
     
     // Active Orders
     const [rawActiveOrders, activeOrdersActions] = useFirestoreCollection<ActiveOrder>(branchId, 'activeOrders');
@@ -998,11 +999,11 @@ export const App: React.FC = () => {
                 if (isAdmin) {
                     // Admin: Permanent Delete
                     await newCompletedOrdersActions.remove(id);
-                    setLegacyCompletedOrders(prev => prev.filter(o => o.id !== id));
+                    setLegacyCompletedOrders((prev: CompletedOrder[]) => prev.filter(o => o.id !== id));
                 } else {
                     // Manager: Soft Delete (Hide from list but kept in DB as deleted)
                     await newCompletedOrdersActions.update(id, { isDeleted: true, deletedBy: deleterName });
-                    setLegacyCompletedOrders(prev => prev.map(o => o.id === id ? { ...o, isDeleted: true, deletedBy: deleterName } : o));
+                    setLegacyCompletedOrders((prev: CompletedOrder[]) => prev.map(o => o.id === id ? { ...o, isDeleted: true, deletedBy: deleterName } : o));
                 }
             }
             
@@ -1010,10 +1011,10 @@ export const App: React.FC = () => {
             for (const id of cancelledIds) {
                 if (isAdmin) {
                     await newCancelledOrdersActions.remove(id);
-                    setLegacyCancelledOrders(prev => prev.filter(o => o.id !== id));
+                    setLegacyCancelledOrders((prev: CancelledOrder[]) => prev.filter(o => o.id !== id));
                 } else {
                     await newCancelledOrdersActions.update(id, { isDeleted: true, deletedBy: deleterName });
-                    setLegacyCancelledOrders(prev => prev.map(o => o.id === id ? { ...o, isDeleted: true, deletedBy: deleterName } : o));
+                    setLegacyCancelledOrders((prev: CancelledOrder[]) => prev.map(o => o.id === id ? { ...o, isDeleted: true, deletedBy: deleterName } : o));
                 }
             }
 
@@ -1022,9 +1023,9 @@ export const App: React.FC = () => {
             // In a real app, this should be a collection too for granular soft delete.
             if (printIds.length > 0) {
                 if (isAdmin) {
-                    setPrintHistory(prev => prev.filter(p => !printIds.includes(p.id)));
+                    setPrintHistory((prev: PrintHistoryEntry[]) => prev.filter(p => !printIds.includes(p.id)));
                 } else {
-                    setPrintHistory(prev => prev.map(p => printIds.includes(p.id) ? { ...p, isDeleted: true, deletedBy: deleterName } : p));
+                    setPrintHistory((prev: PrintHistoryEntry[]) => prev.map(p => printIds.includes(p.id) ? { ...p, isDeleted: true, deletedBy: deleterName } : p));
                 }
             }
         } catch (e) {
