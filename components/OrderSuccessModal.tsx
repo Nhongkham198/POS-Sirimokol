@@ -1,21 +1,19 @@
 
-
 import React from 'react';
 
 interface OrderSuccessModalProps {
     isOpen: boolean;
     onClose: () => void;
-    orderId: number;
+    orderNumber: number; // Changed from orderId to orderNumber for clarity
     warningMessage?: string | null;
 }
 
-export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({ isOpen, onClose, orderId, warningMessage }) => {
+export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({ isOpen, onClose, orderNumber, warningMessage }) => {
     if (!isOpen) return null;
 
     return (
         <div 
             className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-            // FIX: Wrap onClose in an arrow function to prevent passing the event object.
             onClick={() => onClose()}
         >
             <div 
@@ -30,9 +28,10 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({ isOpen, on
                 <h3 className="text-2xl leading-6 font-bold text-gray-900 mt-5">ยืนยันออเดอร์สำเร็จ!</h3>
                 <div className="mt-3">
                     <p className="text-lg text-gray-600">
-                        หมายเลขออเดอร์ของคุณคือ:
+                        คิวที่:
                     </p>
-                    <p className="text-4xl font-extrabold text-blue-600 my-2">#{String(orderId).padStart(3, '0')}</p>
+                    {/* Display Order Number with padding (e.g., #01, #02) */}
+                    <p className="text-6xl font-extrabold text-blue-600 my-4">#{String(orderNumber).padStart(2, '0')}</p>
                     <p className="text-md text-gray-500">
                         กำลังเตรียมอาหารให้คุณ...
                     </p>
@@ -58,7 +57,6 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({ isOpen, on
                     <button
                         type="button"
                         className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:text-sm"
-                        // FIX: Wrap onClose in an arrow function to prevent passing the event object.
                         onClick={() => onClose()}
                     >
                         ปิด

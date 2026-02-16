@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useMemo, useRef, Suspense, useCallback } from 'react';
 import Swal from 'sweetalert2';
 import { useFirestoreSync, useFirestoreCollection } from './hooks/useFirestoreSync';
+import { printerService } from './services/printerService'; // Added import
 import { LoginScreen } from './components/LoginScreen';
 import { BranchSelectionScreen } from './components/BranchSelectionScreen';
 import { QueueDisplay } from './components/QueueDisplay';
@@ -254,7 +255,7 @@ export const App: React.FC = () => {
     const [maintenanceItems, setMaintenanceItems] = useFirestoreSync<MaintenanceItem[]>(heavyDataBranchId, 'maintenanceItems', DEFAULT_MAINTENANCE_ITEMS);
     const [maintenanceLogs, setMaintenanceLogs] = useFirestoreSync<MaintenanceLog[]>(heavyDataBranchId, 'maintenanceLogs', []);
     
-    const [orderCounter, setOrderCounter] = useFirestoreSync<OrderCounter>(heavyDataBranchId, 'orderCounter', { count: 0, lastResetDate: new Date().toISOString().split('T')[0] });
+    const [orderCounter, setOrderCounter] = useFirestoreSync<OrderCounter>(heavyDataBranchId || branchId, 'orderCounter', { count: 0, lastResetDate: new Date().toISOString().split('T')[0] });
 
     const [staffCalls, setStaffCalls] = useFirestoreSync<StaffCall[]>(branchId, 'staffCalls', []);
     const [leaveRequests, setLeaveRequests] = useFirestoreSync<LeaveRequest[]>(shouldLoadHeavyData ? null : 'SKIP', 'leaveRequests', []);
@@ -308,7 +309,8 @@ export const App: React.FC = () => {
     const [itemToCustomize, setItemToCustomize] = useState<MenuItem | null>(null);
     const [orderItemToEdit, setOrderItemToEdit] = useState<OrderItem | null>(null); 
     const [orderForModal, setOrderForModal] = useState<ActiveOrder | CompletedOrder | null>(null);
-    const [lastPlacedOrderId, setLastPlacedOrderId] = useState<number | null>(null);
+    // NEW: State for storing the actual order number (e.g. 1, 2) instead of the timestamp ID
+    const [lastPlacedOrderNumber, setLastPlacedOrderNumber] = useState<number | null>(null);
     const [leaveRequestInitialDate, setLeaveRequestInitialDate] = useState<Date | null>(null);
 
     const [isPlacingOrder, setIsPlacingOrder] = useState(false);
@@ -316,6 +318,155 @@ export const App: React.FC = () => {
     const [isCachingImages, setIsCachingImages] = useState(false);
     const imageCacheTriggeredRef = useRef(false);
     const [isAudioUnlocked, setIsAudioUnlocked] = useState(false);
+
+    // --- Order Placement Handler ---
+    const handlePlaceOrder = useCallback(async (
+        items: OrderItem[], 
+        custName: string, 
+        custCount: number, 
+        tableOverride: Table | null, 
+        isLineMan: boolean = false, 
+        lineManNumber?: string, 
+        deliveryProviderName?: string
+    ) => {
+        setIsPlacingOrder(true);
+        try {
+            // --- DAILY RESET LOGIC ---
+            const d = new Date();
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            const today = `${year}-${month}-${day}`;
+
+            let nextOrderNum = 1;
+            let lastResetDate = today;
+
+            if (orderCounter) {
+                if (orderCounter.lastResetDate !== today) {
+                    nextOrderNum = 1;
+                    lastResetDate = today;
+                } else {
+                    nextOrderNum = (orderCounter.count || 0) + 1;
+                    lastResetDate = orderCounter.lastResetDate;
+                }
+            }
+
+            setOrderCounter({ count: nextOrderNum, lastResetDate: lastResetDate });
+
+            const tId = isLineMan ? -1 : (tableOverride ? tableOverride.id : (customerTableId || 0));
+            const tName = isLineMan 
+                ? (deliveryProviderName || 'Delivery') 
+                : (tableOverride ? tableOverride.name : (tables.find(t => t.id === tId)?.name || 'Unknown'));
+            
+            const floorName = isLineMan ? '-' : (tableOverride ? tableOverride.floor : (tables.find(t => t.id === tId)?.floor || '-'));
+
+            const subtotal = items.reduce((sum, i) => sum + i.finalPrice * i.quantity, 0);
+            const taxVal = isTaxEnabled ? subtotal * (taxRate / 100) : 0;
+
+            const newOrder: ActiveOrder = {
+                id: Date.now(),
+                orderNumber: nextOrderNum, 
+                manualOrderNumber: lineManNumber || null,
+                tableId: tId,
+                tableName: tName,
+                floor: floorName,
+                customerName: custName || 'ลูกค้า',
+                customerCount: custCount || 1,
+                items: items,
+                orderType: isLineMan ? 'lineman' : (items.some(i => i.isTakeaway) ? 'takeaway' : 'dine-in'),
+                taxRate: isTaxEnabled ? taxRate : 0,
+                taxAmount: taxVal,
+                placedBy: isCustomerMode ? 'Customer' : (currentUser?.username || 'Staff'),
+                status: 'waiting',
+                orderTime: Date.now(),
+            };
+
+            await activeOrdersActions.add(newOrder);
+
+            if (!isCustomerMode) {
+                setCurrentOrderItems([]);
+                setCustomerName('');
+                setCustomerCount(1);
+                setLastPlacedOrderNumber(nextOrderNum);
+                setModalState(prev => ({ ...prev, isOrderSuccess: true }));
+            }
+            
+            return newOrder;
+
+        } catch (error) {
+            console.error("Place order error", error);
+            Swal.fire('Error', 'ไม่สามารถสั่งอาหารได้', 'error');
+        } finally {
+            setIsPlacingOrder(false);
+        }
+    }, [orderCounter, isTaxEnabled, taxRate, isCustomerMode, currentUser, activeOrdersActions, customerTableId, tables, setOrderCounter]);
+
+    // --- Staff Call Handler ---
+    const handleStaffCall = useCallback(async (tableObj: Table, custName: string) => {
+        const newCall: StaffCall = {
+            id: Date.now(),
+            tableId: tableObj.id,
+            tableName: tableObj.name,
+            customerName: custName,
+            branchId: selectedBranch ? selectedBranch.id : Number(urlBranchId) || 0,
+            timestamp: Date.now()
+        };
+        setStaffCalls(prev => [...prev, newCall]);
+    }, [selectedBranch, urlBranchId, setStaffCalls]);
+
+    // --- Kitchen Handlers (Start, Complete, Print) ---
+    const handleStartCooking = async (orderId: number) => {
+        await activeOrdersActions.update(orderId, { 
+            status: 'cooking',
+            cookingStartTime: Date.now()
+        });
+    };
+
+    const handleCompleteCooking = async (orderId: number) => {
+        // "BUMP" means served/completed from kitchen view. 
+        // In this system's flow, it sets status to 'served'.
+        await activeOrdersActions.update(orderId, { status: 'served' });
+    };
+
+    const handlePrintKitchenOrder = async (orderId: number) => {
+        const order = activeOrders.find(o => o.id === orderId);
+        if (!order) return;
+        
+        if (!printerConfig?.kitchen?.ipAddress) {
+             Swal.fire({
+                icon: 'warning',
+                title: 'ไม่ได้ตั้งค่าเครื่องพิมพ์',
+                text: 'กรุณาตั้งค่าเครื่องพิมพ์ครัวในเมนูตั้งค่าก่อน',
+                timer: 2000,
+                showConfirmButton: false
+            });
+            return;
+        }
+
+        try {
+            Swal.fire({
+                title: 'กำลังส่งคำสั่งพิมพ์...',
+                didOpen: () => { Swal.showLoading(); }
+            });
+            await printerService.printKitchenOrder(order, printerConfig.kitchen);
+            Swal.close();
+            Swal.fire({
+                icon: 'success',
+                title: 'ส่งพิมพ์เรียบร้อย',
+                toast: true,
+                position: 'top-end',
+                showConfirmButton: false,
+                timer: 1500
+            });
+        } catch (error: any) {
+            Swal.close();
+            Swal.fire({
+                icon: 'error',
+                title: 'พิมพ์ไม่สำเร็จ',
+                text: error.message
+            });
+        }
+    };
 
     // ... (Keep badge calculations) ...
     const waitingBadgeCount = useMemo(() => activeOrders.filter(o => o.status === 'waiting').length, [activeOrders]);
@@ -770,9 +921,10 @@ export const App: React.FC = () => {
             allBranchOrders={activeOrders}
             completedOrders={completedOrders}
             onPlaceOrder={async (items, name) => {
-                console.log("Customer placed order:", items, name);
+                // Bridge to main app logic for consistency
+                return handlePlaceOrder(items, name, 1, table, false); 
             }}
-            onStaffCall={() => {}}
+            onStaffCall={(t, name) => handleStaffCall(t, name)}
             recommendedMenuItemIds={recommendedMenuItemIds}
             logoUrl={logoUrl}
             restaurantName={restaurantName}
@@ -880,7 +1032,7 @@ export const App: React.FC = () => {
                                             }}
                                             onRemoveItem={(id) => setCurrentOrderItems(prev => prev.filter(i => i.cartItemId !== id))}
                                             onClearOrder={() => setCurrentOrderItems([])}
-                                            onPlaceOrder={() => { /* Logic */ }}
+                                            onPlaceOrder={handlePlaceOrder}
                                             isPlacingOrder={isPlacingOrder}
                                             tables={tables}
                                             selectedTable={tables.find(t => t.id === selectedTableId) || null}
@@ -937,7 +1089,7 @@ export const App: React.FC = () => {
                                             }}
                                             onRemoveItem={(id) => setCurrentOrderItems(prev => prev.filter(i => i.cartItemId !== id))}
                                             onClearOrder={() => setCurrentOrderItems([])}
-                                            onPlaceOrder={() => { /* Logic */ }}
+                                            onPlaceOrder={handlePlaceOrder}
                                             isPlacingOrder={isPlacingOrder}
                                             tables={tables}
                                             selectedTable={tables.find(t => t.id === selectedTableId) || null}
@@ -1001,9 +1153,55 @@ export const App: React.FC = () => {
                         <Suspense fallback={<PageLoading />}>
                             <KitchenView 
                                 activeOrders={activeOrders} 
-                                onCompleteOrder={() => {}} 
-                                onStartCooking={() => {}} 
-                                onPrintOrder={() => {}} 
+                                onCompleteOrder={async (orderId) => {
+                                    // "BUMP" means served/completed from kitchen view. 
+                                    await activeOrdersActions.update(orderId, { status: 'served' });
+                                }} 
+                                onStartCooking={async (orderId) => {
+                                    await activeOrdersActions.update(orderId, { 
+                                        status: 'cooking',
+                                        cookingStartTime: Date.now()
+                                    });
+                                }} 
+                                onPrintOrder={async (orderId) => {
+                                    const order = activeOrders.find(o => o.id === orderId);
+                                    if (!order) return;
+                                    
+                                    if (!printerConfig?.kitchen?.ipAddress) {
+                                         Swal.fire({
+                                            icon: 'warning',
+                                            title: 'ไม่ได้ตั้งค่าเครื่องพิมพ์',
+                                            text: 'กรุณาตั้งค่าเครื่องพิมพ์ครัวในเมนูตั้งค่าก่อน',
+                                            timer: 2000,
+                                            showConfirmButton: false
+                                        });
+                                        return;
+                                    }
+
+                                    try {
+                                        Swal.fire({
+                                            title: 'กำลังส่งคำสั่งพิมพ์...',
+                                            didOpen: () => { Swal.showLoading(); }
+                                        });
+                                        await printerService.printKitchenOrder(order, printerConfig.kitchen);
+                                        Swal.close();
+                                        Swal.fire({
+                                            icon: 'success',
+                                            title: 'ส่งพิมพ์เรียบร้อย',
+                                            toast: true,
+                                            position: 'top-end',
+                                            showConfirmButton: false,
+                                            timer: 1500
+                                        });
+                                    } catch (error: any) {
+                                        Swal.close();
+                                        Swal.fire({
+                                            icon: 'error',
+                                            title: 'พิมพ์ไม่สำเร็จ',
+                                            text: error.message
+                                        });
+                                    }
+                                }} 
                                 isAutoPrintEnabled={isAutoPrintEnabled} 
                                 onToggleAutoPrint={toggleAutoPrint} 
                             />
@@ -1115,7 +1313,7 @@ export const App: React.FC = () => {
             {/* Modals - Kept same as previous */}
             <LoginModal isOpen={false} onClose={() => {}} />
             <MenuItemModal isOpen={modalState.isMenuItem} onClose={handleModalClose} onSave={handleSaveMenuItem} itemToEdit={itemToEdit} categories={categories} onAddCategory={handleAddCategory} />
-            <OrderSuccessModal isOpen={modalState.isOrderSuccess} onClose={handleModalClose} orderId={lastPlacedOrderId!} />
+            <OrderSuccessModal isOpen={modalState.isOrderSuccess} onClose={handleModalClose} orderNumber={lastPlacedOrderNumber!} />
             <SplitBillModal isOpen={modalState.isSplitBill} order={orderForModal as ActiveOrder | null} onClose={handleModalClose} onConfirmSplit={handleConfirmSplit} />
             <TableBillModal 
                 isOpen={modalState.isTableBill} 
