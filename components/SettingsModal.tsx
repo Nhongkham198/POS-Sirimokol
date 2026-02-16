@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import type { PrinterConfig, ReceiptPrintSettings, KitchenPrinterSettings, CashierPrinterSettings, MenuItem, DeliveryProvider, PrinterStatus, PrinterConnectionType } from '../types';
 import { printerService } from '../services/printerService';
@@ -213,6 +214,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = (props) => {
         }
     };
 
+    // ... (Keep existing handlers for printer, receipt options, etc.) ...
     const handlePrinterChange = (type: 'kitchen' | 'cashier', field: string, value: any) => {
         setSettingsForm(prev => {
             const currentConfig = prev.printerConfig?.[type] || {
@@ -224,16 +226,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = (props) => {
                 targetPrinterPort: '9100'
             };
             
-            // Handle connection type switch to reset specific fields if needed
             if (field === 'connectionType') {
                 if (value === 'usb') {
-                    // Initialize USB defaults if switching to USB
                     if (!currentConfig.vid) currentConfig.vid = '';
                     if (!currentConfig.pid) currentConfig.pid = '';
                 }
             }
 
-            // Ensure receiptOptions exists for cashier
             if (type === 'cashier' && !('receiptOptions' in currentConfig)) {
                 (currentConfig as CashierPrinterSettings).receiptOptions = { ...DEFAULT_RECEIPT_OPTIONS };
             }
@@ -482,8 +481,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = (props) => {
                 
                 const batch = db.batch();
                 
-                // Get current branch ID from URL or local storage if possible, otherwise default to 1
-                // We'll try to detect the active branch ID from the URL params or selectedBranch in localStorage
                 let activeBranchId = '1';
                 const urlParams = new URLSearchParams(window.location.search);
                 const urlBranch = urlParams.get('branchId');
@@ -506,11 +503,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = (props) => {
                     if (!doc.exists) {
                          batch.set(ref, { value: defaultData });
                     } else {
-                         // If exists, do nothing or merge? For initial seeding, we prefer not to overwrite existing user data.
-                         // But we want to ensure structure exists.
-                         // For arrays like menuItems, if empty, we might want to seed.
                          const data = doc.data();
-                         if (!data || !data.value || (Array.isArray(data.value) && data.value.length === 0)) {
+                         // Safety Check:
+                         // 1. If 'value' exists and is not empty array -> Don't overwrite.
+                         // 2. If 'value' does NOT exist, but there are other keys (Legacy/Flattened format) -> Don't overwrite.
+                         
+                         const hasStandardData = data && data.value && Array.isArray(data.value) && data.value.length > 0;
+                         const hasLegacyData = data && !data.value && Object.keys(data).length > 0;
+
+                         if (!hasStandardData && !hasLegacyData) {
+                              // Only write defaults if it's truly empty or just has metadata
                               batch.set(ref, { value: defaultData }, { merge: true });
                          }
                     }
@@ -555,7 +557,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = (props) => {
 
     if (!props.isOpen) return null;
 
-    // ... (Helper render functions: renderImageUpload, renderSoundUpload) ...
+    // ... (Keep render helpers like renderImageUpload, renderSoundUpload, renderPrinterSettings) ...
     const renderImageUpload = (label: string, value: string | null, field: string, inputRef: React.RefObject<HTMLInputElement>) => (
         <div className="border border-gray-200 rounded-lg p-4 bg-white">
             <label className="block text-sm font-medium text-gray-700 mb-2">{label}</label>
@@ -713,7 +715,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = (props) => {
 
                 {type === 'cashier' && receiptOpts && (
                     <div className="mt-6 pt-6 border-t border-gray-200">
-                        {/* ... (Receipt options rendering) ... */}
                         <h4 className="text-lg font-bold text-gray-800 mb-4">รายละเอียดบนใบเสร็จ</h4>
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                             <div className="space-y-6">
@@ -845,7 +846,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = (props) => {
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-6 bg-gray-50">
-                    {/* ... (Existing Tabs: general, printer, menu, delivery) ... */}
+                    {/* ... (Existing Tabs) ... */}
                     {activeTab === 'general' && (
                         <div className="space-y-6 max-w-3xl mx-auto">
                             <div className="bg-white p-6 rounded-lg shadow-sm space-y-4">
