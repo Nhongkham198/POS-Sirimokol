@@ -411,8 +411,42 @@ export const App: React.FC = () => {
             branchId: selectedBranch ? selectedBranch.id : Number(urlBranchId) || 0,
             timestamp: Date.now()
         };
+        // Just update Firestore; the effect below will catch it
         setStaffCalls(prev => [...prev, newCall]);
     }, [selectedBranch, urlBranchId, setStaffCalls]);
+
+    // --- Staff Call Listener (Play Sound & Show Alert) ---
+    // Track previous count to detect NEW calls only
+    const prevStaffCallsLength = useRef(staffCalls.length);
+
+    useEffect(() => {
+        if (!currentUser || isCustomerMode) return; // Only for staff
+
+        if (staffCalls.length > prevStaffCallsLength.current) {
+            // Get the latest call
+            const latestCall = staffCalls[staffCalls.length - 1];
+            
+            // 1. Play Sound
+            const audioUrl = staffCallSoundUrl || "https://firebasestorage.googleapis.com/v0/b/pos-sirimonkol.firebasestorage.app/o/sounds%2Fdefault-notification.mp3?alt=media";
+            const audio = new Audio(audioUrl);
+            audio.play().catch(e => console.error("Sound play failed", e));
+
+            // 2. Show Popup
+            Swal.fire({
+                title: `🔔 เรียกพนักงาน!`,
+                html: `<div class="text-xl">โต๊ะ <b>${latestCall.tableName}</b></div><div class="text-sm text-gray-500 mt-2">(${latestCall.customerName})</div>`,
+                icon: 'info',
+                timer: 10000,
+                timerProgressBar: true,
+                showConfirmButton: true,
+                confirmButtonText: 'รับทราบ',
+                position: 'top-end',
+                toast: true
+            });
+        }
+        prevStaffCallsLength.current = staffCalls.length;
+    }, [staffCalls, currentUser, isCustomerMode, staffCallSoundUrl]);
+
 
     // --- Kitchen Handlers (Start, Complete, Print) ---
     const handleStartCooking = async (orderId: number) => {

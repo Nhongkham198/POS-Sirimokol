@@ -45,6 +45,28 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
     // Simple translation helper placeholder
     const t = (s: string) => s;
 
+    // Filter active orders for THIS table
+    const myActiveOrders = useMemo(() => {
+        return activeOrders.filter(o => o.tableId === table.id);
+    }, [activeOrders, table.id]);
+
+    const totalBillAmount = useMemo(() => {
+        const activeTotal = myActiveOrders.reduce((sum, order) => {
+            const orderSub = order.items.reduce((s, i) => s + (i.finalPrice * i.quantity), 0);
+            return sum + orderSub + order.taxAmount;
+        }, 0);
+        
+        // Also consider completed orders if needed (though usually they leave after paying)
+        // For simplicity, we just show active bill pending payment
+        return activeTotal;
+    }, [myActiveOrders]);
+
+    const totalBillItemsCount = useMemo(() => {
+        return myActiveOrders.reduce((count, order) => {
+            return count + order.items.reduce((c, i) => c + i.quantity, 0);
+        }, 0);
+    }, [myActiveOrders]);
+
     // Filter items
     const filteredItems = useMemo(() => {
         let items = menuItems.filter(item => item.isVisible !== false && item.isAvailable !== false); // Show only visible and available
@@ -53,6 +75,44 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
         }
         return items;
     }, [menuItems, selectedCategory]);
+
+    // Check for payment completion (Auto Exit)
+    useEffect(() => {
+        // Condition: Table WAS active (has history of orders) but now has NO active orders, 
+        // AND there is a very recent completed order for this table (e.g. within last minute)
+        // This prevents the "Thank You" screen from showing immediately if they just sat down at an empty table.
+        
+        const hasActive = myActiveOrders.length > 0;
+        
+        if (!hasActive) {
+            // Check if there is a completed order for this table in the last 60 seconds
+            const recentCompleted = completedOrders.find(o => 
+                o.tableId === table.id && 
+                (Date.now() - o.completionTime) < 60000 // 1 minute window
+            );
+
+            if (recentCompleted) {
+                Swal.fire({
+                    icon: 'success',
+                    title: 'ขอบคุณที่ใช้บริการ',
+                    text: 'การชำระเงินเสร็จสิ้นแล้ว หวังว่าจะได้ให้บริการท่านอีกครั้ง',
+                    allowOutsideClick: false,
+                    allowEscapeKey: false,
+                    confirmButtonText: 'ปิดหน้าต่าง',
+                    backdrop: `
+                        rgba(0,0,123,0.4)
+                        url("/images/nyan-cat.gif")
+                        left top
+                        no-repeat
+                    `
+                }).then(() => {
+                    // Close window if possible, or reload to clear state (simulating exit)
+                    window.location.reload(); 
+                });
+            }
+        }
+    }, [myActiveOrders, completedOrders, table.id]);
+
 
     const handleAddToCart = (item: MenuItem) => {
         if (item.optionGroups && item.optionGroups.length > 0) {
@@ -112,6 +172,41 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
                     showConfirmButton: false
                 });
             }
+        });
+    };
+
+    const handleViewBill = () => {
+        if (myActiveOrders.length === 0) {
+            Swal.fire('ยังไม่มีรายการ', 'คุณยังไม่ได้สั่งอาหาร', 'info');
+            return;
+        }
+
+        let billHtml = `<div class="text-left text-sm max-h-60 overflow-y-auto">`;
+        
+        myActiveOrders.forEach(order => {
+            order.items.forEach(item => {
+                billHtml += `
+                    <div class="flex justify-between py-1 border-b border-dashed border-gray-200">
+                        <span>${item.quantity}x ${item.name}</span>
+                        <span>${(item.finalPrice * item.quantity).toLocaleString()} ฿</span>
+                    </div>
+                `;
+            });
+        });
+        
+        billHtml += `</div>
+            <div class="flex justify-between font-bold text-lg mt-4 pt-2 border-t border-black">
+                <span>ยอดรวม</span>
+                <span class="text-blue-600">${totalBillAmount.toLocaleString()} ฿</span>
+            </div>
+            <p class="text-xs text-gray-500 mt-2 text-center">กรุณาแจ้งพนักงานเพื่อชำระเงิน</p>
+        `;
+
+        Swal.fire({
+            title: `รายการอาหาร โต๊ะ ${table.name}`,
+            html: billHtml,
+            showCloseButton: true,
+            showConfirmButton: false
         });
     };
 
@@ -200,11 +295,25 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
                         <p className="text-sm text-gray-500 mt-0.5">โต๊ะ: {table.name}</p>
                     </div>
                 </div>
-                <button onClick={handleStaffCallClick} className="bg-red-100 text-red-600 p-2 rounded-full shadow-sm active:bg-red-200">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-                    </svg>
-                </button>
+                
+                <div className="flex items-center gap-2">
+                    {/* View Bill Button */}
+                    {totalBillAmount > 0 && (
+                        <button 
+                            onClick={handleViewBill}
+                            className="bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg text-sm font-bold shadow-sm border border-blue-100 active:bg-blue-100 flex flex-col items-end leading-none"
+                        >
+                            <span>฿{totalBillAmount.toLocaleString()}</span>
+                            <span className="text-[10px] font-normal">{totalBillItemsCount} รายการ</span>
+                        </button>
+                    )}
+
+                    <button onClick={handleStaffCallClick} className="bg-red-100 text-red-600 p-2 rounded-full shadow-sm active:bg-red-200">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                        </svg>
+                    </button>
+                </div>
             </header>
 
             {/* Customer Name Input (Optional) */}
