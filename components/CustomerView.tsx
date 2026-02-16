@@ -117,19 +117,26 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
         }
     }, [callCooldown]);
 
-    // 2. Direct Firestore Listener for Completed Orders (Fix for missing props data)
+    // 2. Direct Firestore Listener for Completed Orders (Fix for missing props data & Index Issues)
     useEffect(() => {
         if (!db || !branchIdParam || !table) return;
 
-        // Listen to 'completedOrders_v2' for this table, ordered by time
+        // Query the latest 20 completed orders for the branch.
+        // We do NOT filter by tableId in the query to avoid needing a composite index.
+        // We filter in memory instead.
         const unsubscribe = db.collection(`branches/${branchIdParam}/completedOrders_v2`)
-            .where('tableId', '==', table.id)
             .orderBy('completionTime', 'desc')
-            .limit(1)
+            .limit(20) 
             .onSnapshot((snapshot: any) => {
                 if (!snapshot.empty) {
-                    const data = snapshot.docs[0].data() as CompletedOrder;
-                    setLatestCompletedOrder(data);
+                    // Find the most recent order for THIS table
+                    const found = snapshot.docs
+                        .map((d: any) => d.data() as CompletedOrder)
+                        .find((o: CompletedOrder) => o.tableId === table.id);
+                    
+                    if (found) {
+                        setLatestCompletedOrder(found);
+                    }
                 }
             }, (error: any) => {
                 console.warn("Error listening to completed orders:", error);
@@ -155,14 +162,16 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
             if (!ignoreHistoryRef.current) {
                 // Check if there is a completed order for this table in the last 5 minutes
                 // Check both prop (if available) and direct listener
+                const checkTimeWindow = 300000; // 5 minutes in ms
+
                 const recentFromProp = completedOrders.find(o => 
                     o.tableId === table.id && 
-                    (Date.now() - o.completionTime) < 300000 // 5 minutes window
+                    (Date.now() - o.completionTime) < checkTimeWindow
                 );
                 
                 let recentFromDirect = null;
                 if (latestCompletedOrder && latestCompletedOrder.tableId === table.id) {
-                     if ((Date.now() - latestCompletedOrder.completionTime) < 300000) {
+                     if ((Date.now() - latestCompletedOrder.completionTime) < checkTimeWindow) {
                          recentFromDirect = latestCompletedOrder;
                      }
                 }
@@ -179,7 +188,6 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
                 } else {
                     // No active order AND No recent completed order (Time expired) -> Unlock
                     // Only unlock if we were previously locked. 
-                    // NOTE: If we are just idle on menu with no orders, this block runs but isThankYouScreenVisible is false, so nothing happens.
                     if (isThankYouScreenVisible) {
                         localStorage.removeItem(STORAGE_KEY);
                         setIsThankYouScreenVisible(false);
