@@ -72,6 +72,17 @@ export const App: React.FC = () => {
     const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 1024);
     const [isOnline, setIsOnline] = useState(navigator.onLine);
 
+    // Dynamic resize listener to update isDesktop
+    useEffect(() => {
+        const handleResize = () => {
+            const width = window.innerWidth;
+            const newIsDesktop = width >= 1024;
+            setIsDesktop(newIsDesktop);
+        };
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
+
     // --- AUTH & BRANCH STATE ---
     // Destructure isSynced to control global loading
     const [users, setUsers, isUsersSynced] = useFirestoreSync<User[]>(null, 'users', DEFAULT_USERS);
@@ -1615,8 +1626,8 @@ export const App: React.FC = () => {
                     currentClosingTime={closingTime} 
                     onSavePrinterConfig={setPrinterConfig} 
                     menuItems={menuItems} 
-                    currentRecommendedMenuItemIds={recommendedMenuItemIds} 
-                    onSaveRecommendedItems={setRecommendedMenuItemIds} 
+                    currentRecommendedMenuItemIds={recommendedMenuItemIds as number[]} 
+                    onSaveRecommendedItems={(ids: number[]) => setRecommendedMenuItemIds(ids)} 
                     deliveryProviders={deliveryProviders} 
                     onSaveDeliveryProviders={setDeliveryProviders}
                     currentRestaurantAddress={restaurantAddress}

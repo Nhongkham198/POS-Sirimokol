@@ -414,9 +414,16 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
 
             {/* Menu Grid */}
             <div className="flex-1 overflow-y-auto p-4">
-                <div className="grid grid-cols-2 gap-4 pb-20">
+                {/* 
+                    RESPONSIVE UPDATE:
+                    - grid-cols-2: Default (Mobile)
+                    - md:grid-cols-3: Tablet
+                    - lg:grid-cols-4: Small Laptop
+                    - xl:grid-cols-5: Desktop
+                */}
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 pb-20">
                     {filteredItems.map(item => (
-                        <div key={item.id} className="bg-white rounded-xl shadow-sm overflow-hidden flex flex-col h-full" onClick={() => handleAddToCart(item)}>
+                        <div key={item.id} className="bg-white rounded-xl shadow-sm overflow-hidden flex flex-col h-full hover:shadow-md transition-shadow" onClick={() => handleAddToCart(item)}>
                             <div className="aspect-[4/3] bg-gray-200 relative">
                                 <MenuItemImage src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
                                 {recommendedMenuItemIds.includes(item.id) && (
@@ -429,7 +436,7 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
                                 <h3 className="font-bold text-gray-800 text-sm line-clamp-2 mb-1">{item.name}</h3>
                                 <div className="mt-auto flex justify-between items-center">
                                     <span className="text-blue-600 font-bold">{item.price.toLocaleString()} ฿</span>
-                                    <button className="w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center font-bold text-lg leading-none">+</button>
+                                    <button className="w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center font-bold text-lg leading-none hover:bg-blue-200">+</button>
                                 </div>
                             </div>
                         </div>
@@ -442,7 +449,7 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
                 <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-white via-white to-transparent z-20">
                     <button 
                         onClick={() => setIsCartOpen(true)}
-                        className="w-full bg-blue-600 text-white rounded-xl shadow-lg p-3 flex justify-between items-center animate-bounce-in"
+                        className="w-full bg-blue-600 text-white rounded-xl shadow-lg p-3 flex justify-between items-center animate-bounce-in max-w-xl mx-auto"
                     >
                         <div className="flex items-center gap-3">
                             <div className="bg-white text-blue-600 font-bold w-8 h-8 rounded-full flex items-center justify-center">
@@ -459,7 +466,7 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
             {isCartOpen && (
                 <div className="fixed inset-0 z-50 bg-gray-900 bg-opacity-95 flex flex-col h-full animate-slide-up">
                     <div className="flex-1 overflow-y-auto p-4 pb-32">
-                        <div className="flex justify-between items-center mb-6 text-white">
+                        <div className="flex justify-between items-center mb-6 text-white max-w-2xl mx-auto w-full">
                             <h2 className="text-2xl font-bold">รายการที่เลือก</h2>
                             <button onClick={() => setIsCartOpen(false)} className="bg-gray-800 p-2 rounded-full text-gray-400 hover:text-white">
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -468,47 +475,51 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
                             </button>
                         </div>
 
-                        {/* Customer Name Input in Cart */}
-                        <div className="bg-gray-800 p-4 rounded-xl mb-4 border border-gray-700">
-                            <label className="block text-gray-400 text-sm mb-2">ชื่อผู้สั่ง (Optional)</label>
-                            <input 
-                                type="text" 
-                                value={customerName}
-                                onChange={(e) => setCustomerName(e.target.value)}
-                                placeholder="ใส่ชื่อเล่น..."
-                                className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white focus:outline-none focus:border-blue-500"
-                            />
-                        </div>
-
-                        {cartItems.map((item, idx) => (
-                            <div key={idx} className="bg-gray-800 p-4 rounded-xl mb-3 flex justify-between items-start">
-                                <div className="flex-1">
-                                    <h4 className="text-white font-bold text-lg">{item.name}</h4>
-                                    {item.selectedOptions.length > 0 && (
-                                        <p className="text-gray-400 text-sm mt-1">{item.selectedOptions.map(o => o.name).join(', ')}</p>
-                                    )}
-                                    {item.notes && <p className="text-yellow-500 text-sm mt-1">Note: {item.notes}</p>}
-                                    <p className="text-blue-400 font-bold mt-2">{item.finalPrice.toLocaleString()} ฿</p>
-                                </div>
-                                <div className="flex flex-col items-end gap-3">
-                                    <button onClick={() => handleRemoveFromCart(item.cartItemId)} className="text-red-400 text-sm underline">ลบ</button>
-                                    <span className="bg-gray-700 text-white px-3 py-1 rounded-lg font-bold">x{item.quantity}</span>
-                                </div>
+                        <div className="max-w-2xl mx-auto w-full">
+                            {/* Customer Name Input in Cart */}
+                            <div className="bg-gray-800 p-4 rounded-xl mb-4 border border-gray-700">
+                                <label className="block text-gray-400 text-sm mb-2">ชื่อผู้สั่ง (Optional)</label>
+                                <input 
+                                    type="text" 
+                                    value={customerName}
+                                    onChange={(e) => setCustomerName(e.target.value)}
+                                    placeholder="ใส่ชื่อเล่น..."
+                                    className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white focus:outline-none focus:border-blue-500"
+                                />
                             </div>
-                        ))}
+
+                            {cartItems.map((item, idx) => (
+                                <div key={idx} className="bg-gray-800 p-4 rounded-xl mb-3 flex justify-between items-start">
+                                    <div className="flex-1">
+                                        <h4 className="text-white font-bold text-lg">{item.name}</h4>
+                                        {item.selectedOptions.length > 0 && (
+                                            <p className="text-gray-400 text-sm mt-1">{item.selectedOptions.map(o => o.name).join(', ')}</p>
+                                        )}
+                                        {item.notes && <p className="text-yellow-500 text-sm mt-1">Note: {item.notes}</p>}
+                                        <p className="text-blue-400 font-bold mt-2">{item.finalPrice.toLocaleString()} ฿</p>
+                                    </div>
+                                    <div className="flex flex-col items-end gap-3">
+                                        <button onClick={() => handleRemoveFromCart(item.cartItemId)} className="text-red-400 text-sm underline">ลบ</button>
+                                        <span className="bg-gray-700 text-white px-3 py-1 rounded-lg font-bold">x{item.quantity}</span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
                     </div>
 
                     <div className="bg-gray-800 border-t border-gray-700 p-4 absolute bottom-0 left-0 right-0">
-                        <div className="flex justify-between items-center mb-4 text-white">
-                            <span className="text-lg">ยอดรวม</span>
-                            <span className="text-3xl font-bold">{cartTotal.toLocaleString()} ฿</span>
+                        <div className="max-w-2xl mx-auto w-full">
+                            <div className="flex justify-between items-center mb-4 text-white">
+                                <span className="text-lg">ยอดรวม</span>
+                                <span className="text-3xl font-bold">{cartTotal.toLocaleString()} ฿</span>
+                            </div>
+                            <button 
+                                onClick={handleSubmitOrder}
+                                className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-4 rounded-xl text-xl shadow-lg transition-colors"
+                            >
+                                ยืนยันสั่งอาหาร
+                            </button>
                         </div>
-                        <button 
-                            onClick={handleSubmitOrder}
-                            className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-4 rounded-xl text-xl shadow-lg transition-colors"
-                        >
-                            ยืนยันสั่งอาหาร
-                        </button>
                     </div>
                 </div>
             )}
