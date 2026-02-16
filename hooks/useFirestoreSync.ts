@@ -166,8 +166,6 @@ export function useFirestoreSync<T>(
         const isBranchSpecific = !globalKeys.includes(collectionKey);
         
         if (isBranchSpecific && !branchId) {
-             // If trying to set a branch-specific value but no branch is selected, just update local state
-             // This prevents "flicker" but warns that data won't persist
              console.warn(`Attempted to save ${collectionKey} without a valid Branch ID. Data will be local only.`);
              setValue(newValue);
              return;
@@ -182,9 +180,46 @@ export function useFirestoreSync<T>(
         setValue((prevValue) => {
             const resolvedValue = newValue instanceof Function ? newValue(prevValue) : newValue;
             
+            // --- NEW: Size Check Logic ---
+            try {
+                const jsonString = JSON.stringify({ value: resolvedValue });
+                const sizeInBytes = new Blob([jsonString]).size;
+                const sizeInMB = sizeInBytes / (1024 * 1024);
+
+                // Firestore Limit is 1MB. We warn at 0.9MB.
+                if (sizeInMB > 0.9) {
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'ข้อมูลขนาดใหญ่เกินไป!',
+                        html: `
+                            <div class="text-left">
+                                <p>ข้อมูล <b>${collectionKey}</b> มีขนาด <b>${sizeInMB.toFixed(2)} MB</b></p>
+                                <p class="text-red-600 font-bold mt-2">เกินขีดจำกัดของฐานข้อมูล (สูงสุด 1 MB)</p>
+                                <p class="text-sm mt-2 text-gray-600">คำแนะนำ:</p>
+                                <ul class="list-disc list-inside text-sm text-gray-600">
+                                    <li>ลดขนาดรูปภาพ (ใช้ลิงก์แทน Base64)</li>
+                                    <li>ลบรายการที่ไม่จำเป็นออก</li>
+                                </ul>
+                            </div>
+                        `,
+                        confirmButtonText: 'เข้าใจแล้ว (จะไม่ถูกบันทึก)'
+                    });
+                    // Still update local state so UI doesn't revert immediately, but DB write will likely fail
+                }
+            } catch (e) {
+                console.error("Error checking data size", e);
+            }
+            // -----------------------------
+
             docRef.set({ value: resolvedValue })
                 .catch(err => {
                     console.error(`Failed to write ${collectionKey} to Firestore:`, err);
+                    
+                    let errorMessage = err.message;
+                    if (err.code === 'resource-exhausted') {
+                        errorMessage = 'โควต้าเต็ม หรือ ขนาดไฟล์ใหญ่เกิน 1MB';
+                    }
+
                     // ALERT USER ON WRITE ERROR - This is critical
                     Swal.fire({
                         icon: 'error',
@@ -193,11 +228,11 @@ export function useFirestoreSync<T>(
                             <p>ข้อมูลที่คุณแก้ <b>จะไม่ถูกบันทึกลงระบบจริง</b></p>
                             <p class="text-sm mt-2 text-gray-500">สาเหตุที่เป็นไปได้:</p>
                             <ul class="text-sm text-left list-disc list-inside text-gray-500 mb-2">
-                                <li>Config (API Key) ไม่ถูกต้อง</li>
+                                <li>ข้อมูลขนาดใหญ่เกินไป (รูปภาพเยอะ)</li>
                                 <li>อินเทอร์เน็ตหลุด</li>
-                                <li>ไม่มีสิทธิ์เขียนข้อมูล</li>
+                                <li>โควต้า Firebase เต็ม</li>
                             </ul>
-                            <p class="text-xs text-red-500">${err.message}</p>
+                            <p class="text-xs text-red-500">${errorMessage}</p>
                         `,
                         confirmButtonText: 'รับทราบ'
                     });
