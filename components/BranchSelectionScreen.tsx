@@ -1,3 +1,4 @@
+
 import React, { useMemo } from 'react';
 import type { Branch, User } from '../types';
 
@@ -64,22 +65,23 @@ export const BranchSelectionScreen: React.FC<BranchSelectionScreenProps> = ({
                 )}
                 
                 <div className="pt-6 border-t border-gray-200">
-                     {isAdmin ? (
+                     {/* Hidden Manage Branches button as requested */}
+                     {/* {isAdmin ? (
                         <button
                             onClick={onManageBranches}
                             className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 transition-colors"
                         >
                             จัดการสาขา
                         </button>
-                    ) : (
-                        branchesToShow.length === 0 && (
-                            <button
-                                onClick={onLogout}
-                                className="px-6 py-3 bg-gray-600 text-white font-semibold rounded-lg shadow-md hover:bg-gray-700 transition-colors"
-                            >
-                                กลับไปหน้า Login
-                            </button>
-                        )
+                    ) : ... } */}
+                    
+                    {branchesToShow.length === 0 && (
+                        <button
+                            onClick={onLogout}
+                            className="px-6 py-3 bg-gray-600 text-white font-semibold rounded-lg shadow-md hover:bg-gray-700 transition-colors"
+                        >
+                            กลับไปหน้า Login
+                        </button>
                     )}
                 </div>
             </div>
