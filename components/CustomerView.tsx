@@ -45,6 +45,9 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
     // State for Sticky Thank You Screen
     const [isThankYouScreenVisible, setIsThankYouScreenVisible] = useState(false);
     
+    // Cooldown State for Staff Call
+    const [callCooldown, setCallCooldown] = useState(0);
+
     // Ref to ignore history checks on a fresh scan
     const ignoreHistoryRef = useRef(false);
 
@@ -81,6 +84,7 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
 
     // --- LOGIC: Sticky Thank You Screen ---
     const STORAGE_KEY = `pos_thankyou_lock_table_${table.id}`;
+    const CALL_COOLDOWN_KEY = `pos_call_cooldown_table_${table.id}`;
 
     // 1. Smart Detection: Refresh vs New Scan
     useEffect(() => {
@@ -115,7 +119,27 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
             const lockedState = localStorage.getItem(STORAGE_KEY);
             if (lockedState) setIsThankYouScreenVisible(true);
         }
-    }, [STORAGE_KEY]);
+
+        // Check Call Cooldown on Mount
+        const lastCallTime = localStorage.getItem(CALL_COOLDOWN_KEY);
+        if (lastCallTime) {
+            const timePassed = Date.now() - parseInt(lastCallTime, 10);
+            const cooldownTime = 60000; // 60 seconds
+            if (timePassed < cooldownTime) {
+                setCallCooldown(Math.ceil((cooldownTime - timePassed) / 1000));
+            }
+        }
+    }, [STORAGE_KEY, CALL_COOLDOWN_KEY]);
+
+    // Timer for Cooldown
+    useEffect(() => {
+        if (callCooldown > 0) {
+            const timer = setInterval(() => {
+                setCallCooldown(prev => prev - 1);
+            }, 1000);
+            return () => clearInterval(timer);
+        }
+    }, [callCooldown]);
 
     // 2. Detect Payment Completion & Manage Lock State
     useEffect(() => {
@@ -195,6 +219,8 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
     };
 
     const handleStaffCallClick = () => {
+        if (callCooldown > 0) return;
+
         Swal.fire({
             title: 'เรียกพนักงาน?',
             text: 'พนักงานจะมาที่โต๊ะของคุณสักครู่',
@@ -207,10 +233,17 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
         }).then((result) => {
             if (result.isConfirmed) {
                 onStaffCall(table, customerName || 'ลูกค้า');
+                
+                // Set Cooldown
+                const now = Date.now();
+                localStorage.setItem(CALL_COOLDOWN_KEY, now.toString());
+                setCallCooldown(60);
+
                 Swal.fire({
                     icon: 'success',
                     title: 'เรียกพนักงานแล้ว',
-                    timer: 1500,
+                    text: 'กรุณารอสักครู่',
+                    timer: 2000,
                     showConfirmButton: false
                 });
             }
@@ -373,10 +406,19 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
                         </button>
                     )}
 
-                    <button onClick={handleStaffCallClick} className="bg-red-100 text-red-600 p-2 rounded-full shadow-sm active:bg-red-200">
+                    <button 
+                        onClick={handleStaffCallClick} 
+                        disabled={callCooldown > 0}
+                        className={`p-2 rounded-full shadow-sm active:bg-red-200 transition-all relative ${callCooldown > 0 ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-red-100 text-red-600'}`}
+                    >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                         </svg>
+                        {callCooldown > 0 && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/10 rounded-full">
+                                <span className="text-[10px] font-bold text-black">{callCooldown}</span>
+                            </div>
+                        )}
                     </button>
                 </div>
             </header>

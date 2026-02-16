@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, useRef, Suspense, useCallback } from 'react';
 import Swal from 'sweetalert2';
 import { useFirestoreSync, useFirestoreCollection } from './hooks/useFirestoreSync';
-import { printerService } from './services/printerService'; // Added import
+import { printerService } from './services/printerService'; 
 import { LoginScreen } from './components/LoginScreen';
 import { BranchSelectionScreen } from './components/BranchSelectionScreen';
 import { QueueDisplay } from './components/QueueDisplay';
@@ -438,8 +438,10 @@ export const App: React.FC = () => {
     };
 
     // --- Staff Call Listener (Play Sound & Show Alert) ---
-    // Track last processed ID instead of length to handle array changes correctly
-    const lastProcessedStaffCallId = useRef<number>(0);
+    // Track last processed ID in local storage to persist across refreshes
+    const lastProcessedStaffCallId = useRef<number>(
+        parseInt(localStorage.getItem('lastProcessedStaffCallId') || '0', 10)
+    );
 
     useEffect(() => {
         if (!currentUser || isCustomerMode) return; // Only for staff
@@ -458,6 +460,7 @@ export const App: React.FC = () => {
 
             // Update the tracker so we don't process it again
             lastProcessedStaffCallId.current = latestCall.id;
+            localStorage.setItem('lastProcessedStaffCallId', latestCall.id.toString());
 
             if (isRecent) {
                 // 1. Play Sound
@@ -479,6 +482,7 @@ export const App: React.FC = () => {
         } else if (staffCalls.length === 0) {
              // Reset if list is cleared
              lastProcessedStaffCallId.current = 0;
+             localStorage.setItem('lastProcessedStaffCallId', '0');
         }
     }, [staffCalls, currentUser, isCustomerMode, staffCallSoundUrl, isStaffCallsSynced]);
 
