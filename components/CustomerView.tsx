@@ -4,6 +4,7 @@ import Swal from 'sweetalert2';
 import type { Table, MenuItem, ActiveOrder, CompletedOrder, OrderItem } from '../types';
 import { MenuItemImage } from './MenuItemImage';
 import { ItemCustomizationModal } from './ItemCustomizationModal';
+import { db } from '../firebaseConfig'; // Import db for direct listening
 
 interface CustomerViewProps {
     table: Table;
@@ -56,6 +57,12 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
 
     // Ref to ignore history checks only when manually starting a new session
     const ignoreHistoryRef = useRef(false);
+
+    // Get Branch ID from URL for direct DB access
+    const branchIdParam = useMemo(() => new URLSearchParams(window.location.search).get('branchId'), []);
+    
+    // Local state for latest completed order (Direct DB)
+    const [latestCompletedOrder, setLatestCompletedOrder] = useState<CompletedOrder | null>(null);
 
     // Simple translation helper placeholder
     const t = (s: string) => s;
@@ -110,7 +117,28 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
         }
     }, [callCooldown]);
 
-    // 2. Detect Payment Completion & Manage Lock State
+    // 2. Direct Firestore Listener for Completed Orders (Fix for missing props data)
+    useEffect(() => {
+        if (!db || !branchIdParam || !table) return;
+
+        // Listen to 'completedOrders_v2' for this table, ordered by time
+        const unsubscribe = db.collection(`branches/${branchIdParam}/completedOrders_v2`)
+            .where('tableId', '==', table.id)
+            .orderBy('completionTime', 'desc')
+            .limit(1)
+            .onSnapshot((snapshot: any) => {
+                if (!snapshot.empty) {
+                    const data = snapshot.docs[0].data() as CompletedOrder;
+                    setLatestCompletedOrder(data);
+                }
+            }, (error: any) => {
+                console.warn("Error listening to completed orders:", error);
+            });
+
+        return () => unsubscribe();
+    }, [branchIdParam, table.id]);
+
+    // 3. Detect Payment Completion & Manage Lock State
     useEffect(() => {
         const hasActive = myActiveOrders.length > 0;
         
@@ -126,10 +154,20 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
             // Only check for completion if we haven't explicitly ignored history (via manual new session)
             if (!ignoreHistoryRef.current) {
                 // Check if there is a completed order for this table in the last 5 minutes
-                const recentCompleted = completedOrders.find(o => 
+                // Check both prop (if available) and direct listener
+                const recentFromProp = completedOrders.find(o => 
                     o.tableId === table.id && 
                     (Date.now() - o.completionTime) < 300000 // 5 minutes window
                 );
+                
+                let recentFromDirect = null;
+                if (latestCompletedOrder && latestCompletedOrder.tableId === table.id) {
+                     if ((Date.now() - latestCompletedOrder.completionTime) < 300000) {
+                         recentFromDirect = latestCompletedOrder;
+                     }
+                }
+
+                const recentCompleted = recentFromProp || recentFromDirect;
 
                 if (recentCompleted) {
                     // Set Sticky State if not already set
@@ -140,6 +178,8 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
                     }
                 } else {
                     // No active order AND No recent completed order (Time expired) -> Unlock
+                    // Only unlock if we were previously locked. 
+                    // NOTE: If we are just idle on menu with no orders, this block runs but isThankYouScreenVisible is false, so nothing happens.
                     if (isThankYouScreenVisible) {
                         localStorage.removeItem(STORAGE_KEY);
                         setIsThankYouScreenVisible(false);
@@ -147,7 +187,7 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
                 }
             }
         }
-    }, [myActiveOrders, completedOrders, table.id, isThankYouScreenVisible, STORAGE_KEY]);
+    }, [myActiveOrders, completedOrders, latestCompletedOrder, table.id, isThankYouScreenVisible, STORAGE_KEY]);
 
     const handleNewSession = () => {
         // Manual override to start new order
