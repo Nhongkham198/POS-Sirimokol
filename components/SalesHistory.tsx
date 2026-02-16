@@ -106,9 +106,9 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({
     // ... Filtering logic ...
     const filteredCompleted = useMemo(() => {
         let items = completedOrders;
-        // Logic Update: Only 'admin' and 'auditor' can see deleted items.
-        // 'branch-admin' (Manager) will perform soft-delete but won't see them anymore.
-        if (!['admin', 'auditor'].includes(currentUser?.role || '')) {
+        // Logic: ONLY 'admin' sees deleted items. Everyone else sees non-deleted.
+        // Even 'branch-admin' who performs soft-delete won't see it after refreshing.
+        if (currentUser?.role !== 'admin') {
              items = items.filter(o => !o.isDeleted);
         }
 
@@ -130,8 +130,7 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({
 
     const filteredCancelled = useMemo(() => {
         let items = cancelledOrders;
-        // Logic Update: Only 'admin' and 'auditor' can see deleted items.
-        if (!['admin', 'auditor'].includes(currentUser?.role || '')) {
+        if (currentUser?.role !== 'admin') {
              items = items.filter(o => !o.isDeleted);
         }
 
@@ -152,8 +151,7 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({
 
     const filteredPrint = useMemo(() => {
         let items = printHistory;
-        // Logic Update: Only 'admin' and 'auditor' can see deleted items.
-        if (!['admin', 'auditor'].includes(currentUser?.role || '')) {
+        if (currentUser?.role !== 'admin') {
              items = items.filter(o => !o.isDeleted);
         }
 
@@ -174,7 +172,6 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({
 
     // ... Export functions ...
     const handleExportHistory = () => {
-        // Expand orders to item level rows
         const data: any[] = [];
         
         filteredCompleted.forEach(order => {
@@ -198,7 +195,6 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({
                     });
                 });
             } else {
-                // Fallback for empty orders
                 data.push({
                     'Order #': order.orderNumber,
                     'Date': new Date(order.completionTime).toLocaleDateString('th-TH'),
@@ -265,12 +261,18 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({
         const count = selectedCompletedIds.size + selectedCancelledIds.size + selectedPrintIds.size;
         if (count === 0) return;
 
+        const isAdmin = currentUser?.role === 'admin';
+        const actionText = isAdmin ? 'ลบอย่างถาวร' : 'ลบรายการ';
+        const warningText = isAdmin 
+            ? 'ข้อมูลจะถูกลบออกจากฐานข้อมูลและไม่สามารถกู้คืนได้!' 
+            : 'รายการจะถูกซ่อนจากหน้านี้';
+
         const result = await Swal.fire({
-            title: 'ยืนยันการลบ?',
-            text: `คุณต้องการลบรายการที่เลือกจำนวน ${count} รายการใช่หรือไม่?`,
+            title: `ยืนยันการ${actionText}?`,
+            text: `คุณต้องการ${actionText}ที่เลือกจำนวน ${count} รายการใช่หรือไม่? ${warningText}`,
             icon: 'warning',
             showCancelButton: true,
-            confirmButtonText: 'ลบเลย',
+            confirmButtonText: isAdmin ? 'ลบถาวร' : 'ยืนยันลบ',
             cancelButtonText: 'ยกเลิก',
             confirmButtonColor: '#d33'
         });
@@ -284,7 +286,7 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({
             setSelectedCompletedIds(new Set());
             setSelectedCancelledIds(new Set());
             setSelectedPrintIds(new Set());
-            Swal.fire('ลบแล้ว', 'รายการถูกลบเรียบร้อยแล้ว', 'success');
+            Swal.fire('ดำเนินการสำเร็จ', 'รายการถูกจัดการเรียบร้อยแล้ว', 'success');
         }
     };
 
@@ -298,7 +300,7 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({
         return `${year}-${month}-${day}`;
     }, [selectedDate, filterType]);
 
-    // -- Helper Components for Styling --
+    // -- Helper Components --
     const TabPill = ({ id, label, count, active, onClick }: { id: string, label: string, count: number, active: boolean, onClick: () => void }) => (
         <button 
             onClick={onClick}
@@ -326,7 +328,6 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({
         </button>
     );
 
-    // Use a render function instead of a Component to prevent remounting/focus loss on input change
     const renderDateInput = () => (
         <div className="relative w-full md:w-auto">
             {filterType === 'year' ? (
@@ -334,7 +335,7 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({
                     type="text"
                     inputMode="numeric"
                     maxLength={4}
-                    value={yearInput} // Use local state
+                    value={yearInput} 
                     onChange={handleDateChange}
                     placeholder="YYYY"
                     className="w-full md:w-36 border border-gray-200 bg-white rounded-xl px-3 py-2.5 text-sm font-medium text-gray-600 focus:ring-2 focus:ring-blue-500 shadow-sm"
@@ -357,7 +358,6 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({
             <div className="flex flex-col gap-4 mb-6 flex-shrink-0">
                 
                 {/* 1. Tabs */}
-                {/* Mobile Dropdown */}
                 <div className="md:hidden relative w-full">
                     <select
                         value={activeTab}
@@ -373,7 +373,6 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({
                     </div>
                 </div>
 
-                {/* Desktop Tabs */}
                 <div className="hidden md:flex flex-wrap gap-3">
                     <TabPill id="completed" label="ประวัติการขาย" count={filteredCompleted.length} active={activeTab === 'completed'} onClick={() => setActiveTab('completed')} />
                     <TabPill id="cancelled" label="ประวัติการยกเลิก" count={filteredCancelled.length} active={activeTab === 'cancelled'} onClick={() => setActiveTab('cancelled')} />
@@ -424,7 +423,7 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({
                         </div>
                     </div>
 
-                    {/* Export Button - Hidden on Mobile (< md) */}
+                    {/* Export Button */}
                     {(activeTab === 'completed' || activeTab === 'cancelled') && (
                         <button 
                             onClick={activeTab === 'completed' ? handleExportHistory : handleExportCancellations} 
@@ -467,7 +466,7 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({
                         disabled={selectedCompletedIds.size + selectedCancelledIds.size + selectedPrintIds.size === 0}
                         className="px-4 py-1.5 bg-red-600 text-white text-sm font-bold rounded-lg hover:bg-red-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors shadow-sm"
                     >
-                        ลบที่เลือก
+                        {currentUser?.role === 'admin' ? 'ลบถาวร' : 'ลบรายการ'}
                     </button>
                 </div>
             )}
@@ -487,7 +486,7 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({
                                     onInitiateCashBill={onInitiateCashBill}
                                     isSelected={selectedCompletedIds.has(order.id)}
                                     onToggleSelection={(id) => toggleSelect(id, 'completed')}
-                                    onReprintReceipt={onReprintReceipt} // Pass new prop
+                                    onReprintReceipt={onReprintReceipt} 
                                 />
                             ))}
                         </div>

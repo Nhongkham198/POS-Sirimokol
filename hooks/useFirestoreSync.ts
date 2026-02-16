@@ -7,12 +7,18 @@ import 'firebase/compat/firestore';
 import Swal from 'sweetalert2';
 
 // Hook for Single Document Sync (Legacy/Config/Arrays)
+// Returns: [value, setValue, isSynced]
 export function useFirestoreSync<T>(
     branchId: string | null,
     collectionKey: string,
     initialValue: T
-): [T, React.Dispatch<React.SetStateAction<T>>] {
+): [T, React.Dispatch<React.SetStateAction<T>>, boolean] {
     const [value, setValue] = useState<T>(initialValue);
+    const [isSynced, setIsSynced] = useState(false); 
+    
+    // SAFETY LOCK: ป้องกันการเขียนข้อมูลทับ ถ้ายังไม่ได้อ่านข้อมูลครั้งแรก
+    const isReadyToWrite = useRef(false);
+    
     const initialValueRef = useRef(initialValue);
     
     // Keep a ref to the current value to avoid stale closures
@@ -27,9 +33,6 @@ export function useFirestoreSync<T>(
             return () => {};
         }
 
-        // Define keys that should be global (not nested under a branch)
-        // These settings need to be available before a branch is selected (e.g., Login screen)
-        // or shared across all branches.
         const globalKeys = [
             'users', 
             'branches', 
@@ -39,7 +42,7 @@ export function useFirestoreSync<T>(
             'restaurantName', 
             'restaurantAddress', 
             'restaurantPhone', 
-            'taxId', 
+            'taxId',
             'qrCodeUrl',
             'signatureUrl',
             'notificationSoundUrl',
@@ -49,8 +52,15 @@ export function useFirestoreSync<T>(
         const isBranchSpecific = !globalKeys.includes(collectionKey);
         const currentInitialValue = initialValueRef.current;
 
+        // Reset sync status when branch changes
+        setIsSynced(false);
+        isReadyToWrite.current = false;
+
         if (isBranchSpecific && !branchId) {
             setValue(currentInitialValue);
+            setIsSynced(true); 
+            // If no branch selected, we assume local mode, so writing is allowed locally
+            isReadyToWrite.current = true; 
             return () => {};
         }
 
@@ -63,6 +73,9 @@ export function useFirestoreSync<T>(
         const unsubscribe = docRef.onSnapshot(
             { includeMetadataChanges: true }, 
             (docSnapshot) => {
+                // *** CRITICAL: Mark as ready to write ONLY after we receive the first snapshot ***
+                isReadyToWrite.current = true;
+
                 if (docSnapshot.exists) {
                     const data = docSnapshot.data();
                     if (data && typeof data.value !== 'undefined') {
@@ -84,57 +97,42 @@ export function useFirestoreSync<T>(
                         else if (collectionKey === 'orderCounter') {
                             const counterData = valueToSet as any;
                             if (!counterData || typeof counterData !== 'object' || typeof counterData.count !== 'number') {
-                                setValue(currentInitialValue);
-                                return;
-                            }
-                            const { count, lastResetDate } = counterData;
-                            let correctedDateString = '';
-                            if (typeof lastResetDate === 'string') {
-                                correctedDateString = lastResetDate;
-                            } else if (lastResetDate && typeof lastResetDate.toDate === 'function') {
-                                const dateObj = lastResetDate.toDate();
-                                const year = dateObj.getFullYear();
-                                const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-                                const day = String(dateObj.getDate()).padStart(2, '0');
-                                correctedDateString = `${year}-${month}-${day}`;
-                            }
-                            if (correctedDateString) {
-                                valueToSet = { count, lastResetDate: correctedDateString };
+                                // Invalid data structure, don't set
                             } else {
-                                setValue(currentInitialValue);
-                                return;
+                                const { count, lastResetDate } = counterData;
+                                let correctedDateString = '';
+                                if (typeof lastResetDate === 'string') {
+                                    correctedDateString = lastResetDate;
+                                } else if (lastResetDate && typeof lastResetDate.toDate === 'function') {
+                                    const dateObj = lastResetDate.toDate();
+                                    const year = dateObj.getFullYear();
+                                    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+                                    const day = String(dateObj.getDate()).padStart(2, '0');
+                                    correctedDateString = `${year}-${month}-${day}`;
+                                }
+                                if (correctedDateString) {
+                                    valueToSet = { count, lastResetDate: correctedDateString };
+                                }
                             }
                         }
 
                         setValue(valueToSet as T);
                     } else {
-                        // Data undefined but doc exists? fallback to initial
+                        // Doc exists but empty value, use initial (safe to write next time)
                         setValue(currentInitialValue);
                     }
                 } else {
-                    // Document doesn't exist yet, stick with defaults but don't error out
-                    // This allows "Initialization" to happen later
+                    // Doc doesn't exist yet. 
+                    // Case 1: First time setup -> Safe to write default.
+                    // Case 2: Deleted -> Safe to write default.
                     setValue(currentInitialValue);
                 }
+                setIsSynced(true); 
             },
             (error) => {
                 console.error(`Firestore sync error for ${collectionKey}:`, error);
-                // NOTIFY USER OF CONNECTION ERRORS
-                if (error.code === 'permission-denied') {
-                    // Silent fail for permissions usually, but good to know in dev
-                    console.warn("Permission denied for", collectionKey);
-                } else {
-                    // Show toast for other connectivity issues
-                    Swal.fire({
-                        icon: 'warning',
-                        title: 'การเชื่อมต่อฐานข้อมูลขัดข้อง',
-                        text: `ไม่สามารถดึงข้อมูลล่าสุดได้ (${collectionKey})`,
-                        toast: true,
-                        position: 'bottom-end',
-                        showConfirmButton: false,
-                        timer: 5000
-                    });
-                }
+                // Do NOT enable writing if read failed to prevent overwriting with stale/default data
+                // isReadyToWrite.current = false; // Optional: be strict about it
             }
         );
 
@@ -142,6 +140,12 @@ export function useFirestoreSync<T>(
     }, [branchId, collectionKey]);
 
     const setAndSyncValue = useCallback((newValue: React.SetStateAction<T>) => {
+        // *** SAFETY LOCK CHECK ***
+        if (!isReadyToWrite.current) {
+            console.warn(`[Safety Lock] Blocked write to ${collectionKey} because initial data hasn't loaded yet.`);
+            return; 
+        }
+
         if (!db) {
             Swal.fire('เชื่อมต่อไม่ได้', 'ไม่พบการตั้งค่าฐานข้อมูล (Firebase)', 'error');
             return;
@@ -180,13 +184,12 @@ export function useFirestoreSync<T>(
         setValue((prevValue) => {
             const resolvedValue = newValue instanceof Function ? newValue(prevValue) : newValue;
             
-            // --- NEW: Size Check Logic ---
+            // --- Size Check Logic ---
             try {
                 const jsonString = JSON.stringify({ value: resolvedValue });
                 const sizeInBytes = new Blob([jsonString]).size;
                 const sizeInMB = sizeInBytes / (1024 * 1024);
 
-                // Firestore Limit is 1MB. We warn at 0.9MB.
                 if (sizeInMB > 0.9) {
                     Swal.fire({
                         icon: 'error',
@@ -204,7 +207,8 @@ export function useFirestoreSync<T>(
                         `,
                         confirmButtonText: 'เข้าใจแล้ว (จะไม่ถูกบันทึก)'
                     });
-                    // Still update local state so UI doesn't revert immediately, but DB write will likely fail
+                    // Still update local state so UI doesn't revert immediately, but prevent DB write
+                    return resolvedValue;
                 }
             } catch (e) {
                 console.error("Error checking data size", e);
@@ -214,26 +218,14 @@ export function useFirestoreSync<T>(
             docRef.set({ value: resolvedValue })
                 .catch(err => {
                     console.error(`Failed to write ${collectionKey} to Firestore:`, err);
-                    
                     let errorMessage = err.message;
                     if (err.code === 'resource-exhausted') {
                         errorMessage = 'โควต้าเต็ม หรือ ขนาดไฟล์ใหญ่เกิน 1MB';
                     }
-
-                    // ALERT USER ON WRITE ERROR - This is critical
                     Swal.fire({
                         icon: 'error',
                         title: 'บันทึกข้อมูลไม่สำเร็จ!',
-                        html: `
-                            <p>ข้อมูลที่คุณแก้ <b>จะไม่ถูกบันทึกลงระบบจริง</b></p>
-                            <p class="text-sm mt-2 text-gray-500">สาเหตุที่เป็นไปได้:</p>
-                            <ul class="text-sm text-left list-disc list-inside text-gray-500 mb-2">
-                                <li>ข้อมูลขนาดใหญ่เกินไป (รูปภาพเยอะ)</li>
-                                <li>อินเทอร์เน็ตหลุด</li>
-                                <li>โควต้า Firebase เต็ม</li>
-                            </ul>
-                            <p class="text-xs text-red-500">${errorMessage}</p>
-                        `,
+                        html: `<p class="text-xs text-red-500 mt-2">${errorMessage}</p>`,
                         confirmButtonText: 'รับทราบ'
                     });
                 });
@@ -242,7 +234,7 @@ export function useFirestoreSync<T>(
         });
     }, [branchId, collectionKey]);
 
-    return [value, setAndSyncValue];
+    return [value, setAndSyncValue, isSynced];
 }
 
 // Hook for Collection-based Sync (Robust, Granular Updates)
@@ -272,15 +264,6 @@ export function useFirestoreCollection<T extends { id: number | string }>(
             setData(items);
         }, error => {
             console.error(`Error syncing collection ${collectionName}:`, error);
-            Swal.fire({
-                icon: 'warning',
-                title: 'Sync Error',
-                text: `ไม่สามารถซิงค์ข้อมูล ${collectionName}`,
-                toast: true,
-                position: 'bottom-end',
-                showConfirmButton: false,
-                timer: 4000
-            });
         });
 
         return () => unsubscribe();
@@ -293,7 +276,7 @@ export function useFirestoreCollection<T extends { id: number | string }>(
             try {
                 await db.collection(`branches/${branchId}/${collectionName}`).doc(docId).set({
                     ...item,
-                    lastUpdated: firebase.firestore.FieldValue.serverTimestamp() // Timestamp Guard
+                    lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
                 });
             } catch (err: any) {
                 console.error(`Failed to add to ${collectionName}:`, err);
