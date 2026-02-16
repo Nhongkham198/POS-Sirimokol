@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useRef, Suspense, useCallback } from 'react';
 import Swal from 'sweetalert2';
 import { useFirestoreSync, useFirestoreCollection } from './hooks/useFirestoreSync';
@@ -133,8 +132,10 @@ export const App: React.FC = () => {
     // Desktop: Visible by default. Mobile: Hidden by default (shown when cart clicked)
     const [isOrderSidebarVisible, setIsOrderSidebarVisible] = useState(window.innerWidth >= 1024);
 
+    // FIX: Default to TRUE if no setting found, so new users get notifications by default
     const [isOrderNotificationsEnabled, setIsOrderNotificationsEnabled] = useState(() => {
-        return localStorage.getItem('isOrderNotificationsEnabled') === 'true';
+        const stored = localStorage.getItem('isOrderNotificationsEnabled');
+        return stored === null ? true : stored === 'true';
     });
 
     const toggleOrderNotifications = () => {
@@ -257,7 +258,7 @@ export const App: React.FC = () => {
     
     const [orderCounter, setOrderCounter] = useFirestoreSync<OrderCounter>(heavyDataBranchId || branchId, 'orderCounter', { count: 0, lastResetDate: new Date().toISOString().split('T')[0] });
 
-    const [staffCalls, setStaffCalls] = useFirestoreSync<StaffCall[]>(branchId, 'staffCalls', []);
+    const [staffCalls, setStaffCalls, isStaffCallsSynced] = useFirestoreSync<StaffCall[]>(branchId, 'staffCalls', []);
     const [leaveRequests, setLeaveRequests] = useFirestoreSync<LeaveRequest[]>(shouldLoadHeavyData ? null : 'SKIP', 'leaveRequests', []);
 
     // --- POS-SPECIFIC LOCAL STATE ---
@@ -415,37 +416,116 @@ export const App: React.FC = () => {
         setStaffCalls(prev => [...prev, newCall]);
     }, [selectedBranch, urlBranchId, setStaffCalls]);
 
+    // --- Helper: Play Audio Robustly ---
+    const playAudio = (url: string | null) => {
+        const audioUrl = url || "https://firebasestorage.googleapis.com/v0/b/pos-sirimonkol.firebasestorage.app/o/sounds%2Fdefault-notification.mp3?alt=media";
+        const audio = new Audio(audioUrl);
+        audio.play().catch(e => {
+            console.warn("Audio play blocked (user interaction needed):", e);
+        });
+    };
+
     // --- Staff Call Listener (Play Sound & Show Alert) ---
-    // Track previous count to detect NEW calls only
-    const prevStaffCallsLength = useRef(staffCalls.length);
+    // Track last processed ID instead of length to handle array changes correctly
+    const lastProcessedStaffCallId = useRef<number>(0);
+
+    useEffect(() => {
+        if (!currentUser || isCustomerMode) return; // Only for staff
+        if (!isStaffCallsSynced) return;
+
+        // Sort to get the actual latest call based on ID/Timestamp
+        const sortedCalls = [...staffCalls].sort((a, b) => a.id - b.id);
+        const latestCall = sortedCalls[sortedCalls.length - 1];
+
+        // If we have a call, and it's newer than the last one we processed
+        if (latestCall && latestCall.id > lastProcessedStaffCallId.current) {
+            
+            // Only alert if it's "New" in terms of time (e.g. created in last 5 mins)
+            // AND we haven't processed it yet.
+            const isRecent = (Date.now() - latestCall.timestamp) < 300000; 
+
+            // Update the tracker so we don't process it again
+            lastProcessedStaffCallId.current = latestCall.id;
+
+            if (isRecent) {
+                // 1. Play Sound
+                playAudio(staffCallSoundUrl);
+
+                // 2. Show Popup
+                Swal.fire({
+                    title: `🔔 เรียกพนักงาน!`,
+                    html: `<div class="text-xl">โต๊ะ <b>${latestCall.tableName}</b></div><div class="text-sm text-gray-500 mt-2">(${latestCall.customerName})</div>`,
+                    icon: 'info',
+                    timer: 10000,
+                    timerProgressBar: true,
+                    showConfirmButton: true,
+                    confirmButtonText: 'รับทราบ',
+                    position: 'top-end',
+                    toast: true
+                });
+            }
+        } else if (staffCalls.length === 0) {
+             // Reset if list is cleared
+             lastProcessedStaffCallId.current = 0;
+        }
+    }, [staffCalls, currentUser, isCustomerMode, staffCallSoundUrl, isStaffCallsSynced]);
+
+    // --- NEW: Order Notification Listener ---
+    const prevActiveOrdersRef = useRef<ActiveOrder[]>([]);
+    const isActiveOrdersFirstLoad = useRef(true);
 
     useEffect(() => {
         if (!currentUser || isCustomerMode) return; // Only for staff
 
-        if (staffCalls.length > prevStaffCallsLength.current) {
-            // Get the latest call
-            const latestCall = staffCalls[staffCalls.length - 1];
-            
-            // 1. Play Sound
-            const audioUrl = staffCallSoundUrl || "https://firebasestorage.googleapis.com/v0/b/pos-sirimonkol.firebasestorage.app/o/sounds%2Fdefault-notification.mp3?alt=media";
-            const audio = new Audio(audioUrl);
-            audio.play().catch(e => console.error("Sound play failed", e));
+        // 1. Filter for orders that are 'waiting' (newly placed)
+        const currentWaitingOrders = activeOrders.filter(o => o.status === 'waiting');
 
-            // 2. Show Popup
-            Swal.fire({
-                title: `🔔 เรียกพนักงาน!`,
-                html: `<div class="text-xl">โต๊ะ <b>${latestCall.tableName}</b></div><div class="text-sm text-gray-500 mt-2">(${latestCall.customerName})</div>`,
-                icon: 'info',
-                timer: 10000,
-                timerProgressBar: true,
-                showConfirmButton: true,
-                confirmButtonText: 'รับทราบ',
-                position: 'top-end',
-                toast: true
-            });
+        // 2. Initial Load Check
+        if (isActiveOrdersFirstLoad.current) {
+            // On first load, just memorize what we have so we don't alert for existing orders
+            if (currentWaitingOrders.length > 0) {
+                 prevActiveOrdersRef.current = currentWaitingOrders;
+            }
+            // Only set first load to false if we actually have data or if sync is likely done. 
+            // Since activeOrders updates dynamically, let's just set it false after first run.
+            isActiveOrdersFirstLoad.current = false;
+            return;
         }
-        prevStaffCallsLength.current = staffCalls.length;
-    }, [staffCalls, currentUser, isCustomerMode, staffCallSoundUrl]);
+
+        // 3. Detect New Orders
+        const prevIds = new Set(prevActiveOrdersRef.current.map(o => o.id));
+        const newOrders = currentWaitingOrders.filter(o => !prevIds.has(o.id));
+
+        if (newOrders.length > 0) {
+            // 4. Check recency (ignore orders older than 5 mins to prevent spam on reconnect)
+            // Use orderTime
+            const hasRecent = newOrders.some(o => (Date.now() - o.orderTime) < 300000);
+
+            if (hasRecent) {
+                // Check if notification is enabled
+                if (isOrderNotificationsEnabled) {
+                     // Play Sound
+                     playAudio(notificationSoundUrl);
+     
+                     // Show Swal Notification
+                     Swal.fire({
+                         title: 'มีออเดอร์ใหม่!',
+                         text: `${newOrders.length} รายการใหม่ส่งเข้าครัว`,
+                         icon: 'success',
+                         timer: 5000,
+                         timerProgressBar: true,
+                         position: 'top-end',
+                         toast: true,
+                         showConfirmButton: false
+                     });
+                }
+            }
+        }
+
+        // Update ref
+        prevActiveOrdersRef.current = currentWaitingOrders;
+
+    }, [activeOrders, currentUser, isCustomerMode, notificationSoundUrl, isOrderNotificationsEnabled]);
 
 
     // --- Kitchen Handlers (Start, Complete, Print) ---
@@ -664,9 +744,82 @@ export const App: React.FC = () => {
         }
     };
 
-    const handleConfirmSplit = (items: OrderItem[]) => {
-        Swal.fire('Split Confirmed', 'Items split logic executed', 'success');
-        setModalState(prev => ({ ...prev, isSplitBill: false }));
+    const handleConfirmSplit = async (itemsToSplit: OrderItem[]) => {
+        if (!orderForModal) return;
+        // Verify it is an ActiveOrder (has status)
+        const originalOrder = activeOrders.find(o => o.id === orderForModal.id);
+        if (!originalOrder) {
+             Swal.fire('Error', 'Order not found or already completed', 'error');
+             return;
+        }
+
+        try {
+            // 1. Calculate New Items for New Order
+            const newOrderItems = itemsToSplit.map(i => ({...i})); // Deep copy safe enough for this level
+
+            // 2. Calculate Remaining Items for Original Order
+            const remainingItems = originalOrder.items.map(item => {
+                const splitItem = itemsToSplit.find(si => si.cartItemId === item.cartItemId);
+                if (splitItem) {
+                    return { ...item, quantity: item.quantity - splitItem.quantity };
+                }
+                return item;
+            }).filter(item => item.quantity > 0);
+
+            // 3. Prepare New Order Data
+            // Logic to get next order number (Duplicated from handlePlaceOrder for reliability)
+            let nextOrderNum = (orderCounter?.count || 0) + 1;
+            const today = new Date().toISOString().split('T')[0];
+            if (orderCounter && orderCounter.lastResetDate !== today) {
+                nextOrderNum = 1;
+            }
+            
+            // Calculate financial for new order
+            const newSubtotal = newOrderItems.reduce((sum, i) => sum + (i.finalPrice * i.quantity), 0);
+            const newTax = isTaxEnabled ? newSubtotal * (taxRate / 100) : 0;
+
+            const newOrder: ActiveOrder = {
+                ...originalOrder, // Copy common fields (table, customer name, etc)
+                id: Date.now(),
+                orderNumber: nextOrderNum,
+                items: newOrderItems,
+                taxAmount: newTax,
+                isSplitChild: true,
+                parentOrderId: originalOrder.orderNumber,
+                status: originalOrder.status, 
+                mergedOrderNumbers: [] 
+            };
+
+            // 4. Update Original Order Data
+            const origSubtotal = remainingItems.reduce((sum, i) => sum + (i.finalPrice * i.quantity), 0);
+            const origTax = isTaxEnabled ? origSubtotal * (taxRate / 100) : 0;
+
+            // 5. Execute Firestore Actions
+            // Add new order
+            await activeOrdersActions.add(newOrder);
+            
+            // Update old order
+            await activeOrdersActions.update(originalOrder.id, { 
+                items: remainingItems,
+                taxAmount: origTax
+            });
+
+            // Update Counter
+            setOrderCounter({ count: nextOrderNum, lastResetDate: today });
+
+            setModalState(prev => ({ ...prev, isSplitBill: false, isTableBill: false }));
+            Swal.fire({
+                icon: 'success',
+                title: 'แยกบิลสำเร็จ',
+                text: `สร้างบิลใหม่ #${nextOrderNum} เรียบร้อยแล้ว`,
+                timer: 1500,
+                showConfirmButton: false
+            });
+
+        } catch (error) {
+            console.error(error);
+            Swal.fire('Error', 'ไม่สามารถแยกบิลได้', 'error');
+        }
     };
 
     const handleConfirmPayment = (orderId: number, paymentDetails: PaymentDetails) => {
@@ -685,10 +838,75 @@ export const App: React.FC = () => {
         }
     };
 
-    const handleMergeAndPay = (sourceOrderIds: number[], targetOrderId: number) => {
-        // ... (Merging Logic Placeholder) ...
-        Swal.fire('Merge & Pay', `Merged ${sourceOrderIds.length} orders into ${targetOrderId}`, 'success');
-        setModalState(prev => ({ ...prev, isMergeBill: false }));
+    const handleMergeAndPay = async (sourceOrderIds: number[], targetOrderId: number) => {
+        try {
+            const targetOrder = activeOrders.find(o => o.id === targetOrderId);
+            if (!targetOrder) throw new Error("Target order not found");
+
+            let mergedItems = [...targetOrder.items];
+            let mergedCustomerCount = targetOrder.customerCount;
+            let mergedOrderNumbers = targetOrder.mergedOrderNumbers || [];
+            
+            // Track IDs to remove to avoid modifying array while iterating
+            const idsToRemove: number[] = [];
+
+            for (const sourceId of sourceOrderIds) {
+                const sourceOrder = activeOrders.find(o => o.id === sourceId);
+                if (sourceOrder) {
+                    // Merge Items
+                    sourceOrder.items.forEach(sourceItem => {
+                        const existingItemIndex = mergedItems.findIndex(mi => mi.cartItemId === sourceItem.cartItemId);
+                        if (existingItemIndex > -1) {
+                            mergedItems[existingItemIndex] = {
+                                ...mergedItems[existingItemIndex],
+                                quantity: mergedItems[existingItemIndex].quantity + sourceItem.quantity
+                            };
+                        } else {
+                            mergedItems.push(sourceItem);
+                        }
+                    });
+
+                    // Merge Metadata
+                    mergedCustomerCount += sourceOrder.customerCount;
+                    mergedOrderNumbers.push(sourceOrder.orderNumber);
+                    if (sourceOrder.mergedOrderNumbers) {
+                        mergedOrderNumbers = [...mergedOrderNumbers, ...sourceOrder.mergedOrderNumbers];
+                    }
+                    
+                    idsToRemove.push(sourceId);
+                }
+            }
+
+            // Recalculate Tax for Target
+            const newSubtotal = mergedItems.reduce((sum, i) => sum + (i.finalPrice * i.quantity), 0);
+            const newTax = isTaxEnabled ? newSubtotal * (taxRate / 100) : 0;
+
+            // Update Target
+            await activeOrdersActions.update(targetOrderId, {
+                items: mergedItems,
+                customerCount: mergedCustomerCount,
+                taxAmount: newTax,
+                mergedOrderNumbers: [...new Set(mergedOrderNumbers)]
+            });
+
+            // Remove Sources
+            for (const id of idsToRemove) {
+                await activeOrdersActions.remove(id);
+            }
+
+            setModalState(prev => ({ ...prev, isMergeBill: false, isTableBill: false }));
+            Swal.fire({
+                icon: 'success',
+                title: 'รวมบิลสำเร็จ',
+                text: `รวม ${idsToRemove.length} บิลเข้ากับ #${targetOrder.orderNumber} แล้ว`,
+                timer: 1500,
+                showConfirmButton: false
+            });
+
+        } catch (error) {
+            console.error(error);
+            Swal.fire('Error', 'ไม่สามารถรวมบิลได้', 'error');
+        }
     };
 
     const handleConfirmMoveTable = (orderId: number, newTableId: number) => {
