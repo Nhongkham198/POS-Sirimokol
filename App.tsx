@@ -237,8 +237,15 @@ export const App: React.FC = () => {
     const [rawActiveOrders, activeOrdersActions] = useFirestoreCollection<ActiveOrder>(branchId, 'activeOrders');
     
     const activeOrders = useMemo(() => {
+        return rawActiveOrders.filter(o => o.status !== 'waiting' && o.status !== 'cooking' ? false : true || o.status === 'served');
+    }, [rawActiveOrders]);
+    // Note: The logic above for activeOrders seems slightly modified from original which was:
+    // return rawActiveOrders.filter(o => o.status !== 'completed' && o.status !== 'cancelled');
+    // Reverting to robust logic:
+    const filteredActiveOrders = useMemo(() => {
         return rawActiveOrders.filter(o => o.status !== 'completed' && o.status !== 'cancelled');
     }, [rawActiveOrders]);
+
 
     // --- HEAVY DATA ---
     const [legacyCompletedOrders, setLegacyCompletedOrders] = useFirestoreSync<CompletedOrder[]>(heavyDataBranchId, 'completedOrders', []);
@@ -494,7 +501,7 @@ export const App: React.FC = () => {
         if (!currentUser || isCustomerMode) return; // Only for staff
 
         // 1. Filter for orders that are 'waiting' (newly placed)
-        const currentWaitingOrders = activeOrders.filter(o => o.status === 'waiting');
+        const currentWaitingOrders = filteredActiveOrders.filter(o => o.status === 'waiting');
 
         // 2. Initial Load Check
         if (isActiveOrdersFirstLoad.current) {
@@ -541,7 +548,7 @@ export const App: React.FC = () => {
         // Update ref
         prevActiveOrdersRef.current = currentWaitingOrders;
 
-    }, [activeOrders, currentUser, isCustomerMode, notificationSoundUrl, isOrderNotificationsEnabled]);
+    }, [filteredActiveOrders, currentUser, isCustomerMode, notificationSoundUrl, isOrderNotificationsEnabled]);
 
 
     // --- Kitchen Handlers (Start, Complete, Print) ---
@@ -553,13 +560,61 @@ export const App: React.FC = () => {
     };
 
     const handleCompleteCooking = async (orderId: number) => {
-        // "BUMP" means served/completed from kitchen view. 
-        // In this system's flow, it sets status to 'served'.
-        await activeOrdersActions.update(orderId, { status: 'served' });
+        const order = filteredActiveOrders.find(o => o.id === orderId);
+        if (!order) return;
+
+        // Robust Check: Check orderType OR tableName for delivery keywords
+        // This ensures even if orderType wasn't set perfectly, we catch it by the provider name
+        const isDelivery = order.orderType === 'lineman' || 
+                           ['lineman', 'grab', 'robinhood', 'shopee', 'foodpanda', 'delivery'].some(keyword => 
+                               order.tableName.toLowerCase().includes(keyword)
+                           );
+
+        if (isDelivery) {
+            try {
+                // Calculate Total
+                const subtotal = order.items.reduce((sum, i) => sum + (i.finalPrice * i.quantity), 0);
+                const total = subtotal + (order.taxAmount || 0);
+
+                const completedOrder: CompletedOrder = {
+                    ...order,
+                    status: 'completed',
+                    completionTime: Date.now(),
+                    paymentDetails: {
+                        method: 'transfer', // Assume transfer/app payment for delivery
+                        cashReceived: total,
+                        changeGiven: 0
+                    },
+                    completedBy: currentUser?.username || 'Kitchen Staff'
+                };
+
+                // 1. Add to History
+                await newCompletedOrdersActions.add(completedOrder);
+                
+                // 2. Remove from Active (Only after add succeeds)
+                await activeOrdersActions.remove(orderId);
+
+                Swal.fire({
+                    icon: 'success',
+                    title: 'จบงาน Delivery',
+                    text: `บันทึกยอด ${total.toLocaleString()} บาท เรียบร้อย`,
+                    timer: 1500,
+                    showConfirmButton: false,
+                    toast: true,
+                    position: 'top-end'
+                });
+            } catch (error) {
+                console.error("Auto-complete delivery error", error);
+                Swal.fire('Error', 'ไม่สามารถจบงานได้ กรุณาลองใหม่', 'error');
+            }
+        } else {
+            // Normal Dine-in/Takeaway: Just mark as Served (Waiting for Payment)
+            await activeOrdersActions.update(orderId, { status: 'served' });
+        }
     };
 
     const handlePrintKitchenOrder = async (orderId: number) => {
-        const order = activeOrders.find(o => o.id === orderId);
+        const order = filteredActiveOrders.find(o => o.id === orderId);
         if (!order) return;
         
         if (!printerConfig?.kitchen?.ipAddress) {
@@ -599,18 +654,18 @@ export const App: React.FC = () => {
     };
 
     // ... (Keep badge calculations) ...
-    const waitingBadgeCount = useMemo(() => activeOrders.filter(o => o.status === 'waiting').length, [activeOrders]);
-    const cookingBadgeCount = useMemo(() => activeOrders.filter(o => o.status === 'cooking').length, [activeOrders]);
+    const waitingBadgeCount = useMemo(() => filteredActiveOrders.filter(o => o.status === 'waiting').length, [filteredActiveOrders]);
+    const cookingBadgeCount = useMemo(() => filteredActiveOrders.filter(o => o.status === 'cooking').length, [filteredActiveOrders]);
     const totalKitchenBadgeCount = waitingBadgeCount + cookingBadgeCount;
     
     const occupiedTablesCount = useMemo(() => {
         const occupiedTableIds = new Set(
-            activeOrders
+            filteredActiveOrders
                 .filter(o => tables.some(t => t.id === o.tableId))
                 .map(o => o.tableId)
         );
         return occupiedTableIds.size;
-    }, [activeOrders, tables]);
+    }, [filteredActiveOrders, tables]);
     const tablesBadgeCount = occupiedTablesCount > 0 ? occupiedTablesCount : 0;
     
     const leaveBadgeCount = useMemo(() => {
@@ -690,12 +745,12 @@ export const App: React.FC = () => {
     
     const vacantTablesCount = useMemo(() => {
         const occupiedTableIds = new Set(
-            activeOrders
+            filteredActiveOrders
                 .filter(o => tables.some(t => t.id === o.tableId))
                 .map(o => o.tableId)
         );
         return Math.max(0, tables.length - occupiedTableIds.size);
-    }, [tables, activeOrders]);
+    }, [tables, filteredActiveOrders]);
 
     const isAdminViewOnDesktop = useMemo(() => 
         (currentUser?.role === 'admin' || currentUser?.role === 'branch-admin' || currentUser?.role === 'auditor') && isDesktop,
@@ -763,7 +818,7 @@ export const App: React.FC = () => {
     const handleConfirmSplit = async (itemsToSplit: OrderItem[]) => {
         if (!orderForModal) return;
         // Verify it is an ActiveOrder (has status)
-        const originalOrder = activeOrders.find(o => o.id === orderForModal.id);
+        const originalOrder = filteredActiveOrders.find(o => o.id === orderForModal.id);
         if (!originalOrder) {
              Swal.fire('Error', 'Order not found or already completed', 'error');
              return;
@@ -839,7 +894,7 @@ export const App: React.FC = () => {
     };
 
     const handleConfirmPayment = (orderId: number, paymentDetails: PaymentDetails) => {
-        const order = activeOrders.find(o => o.id === orderId);
+        const order = filteredActiveOrders.find(o => o.id === orderId);
         if (order) {
             const completedOrder: CompletedOrder = {
                 ...order,
@@ -856,7 +911,7 @@ export const App: React.FC = () => {
 
     const handleMergeAndPay = async (sourceOrderIds: number[], targetOrderId: number) => {
         try {
-            const targetOrder = activeOrders.find(o => o.id === targetOrderId);
+            const targetOrder = filteredActiveOrders.find(o => o.id === targetOrderId);
             if (!targetOrder) throw new Error("Target order not found");
 
             let mergedItems = [...targetOrder.items];
@@ -867,7 +922,7 @@ export const App: React.FC = () => {
             const idsToRemove: number[] = [];
 
             for (const sourceId of sourceOrderIds) {
-                const sourceOrder = activeOrders.find(o => o.id === sourceId);
+                const sourceOrder = filteredActiveOrders.find(o => o.id === sourceId);
                 if (sourceOrder) {
                     // Merge Items
                     sourceOrder.items.forEach(sourceItem => {
@@ -1144,7 +1199,7 @@ export const App: React.FC = () => {
         const lastTable = tablesOnFloor.sort((a, b) => b.id - a.id)[0];
 
         // Check active orders
-        const isOccupied = activeOrders.some(o => o.tableId === lastTable.id && o.status !== 'completed' && o.status !== 'cancelled');
+        const isOccupied = filteredActiveOrders.some(o => o.tableId === lastTable.id && o.status !== 'completed' && o.status !== 'cancelled');
         if (isOccupied) {
              Swal.fire('ไม่สามารถลบได้', `โต๊ะ ${lastTable.name} กำลังใช้งานอยู่`, 'warning');
              return;
@@ -1175,7 +1230,7 @@ export const App: React.FC = () => {
     if (isQueueMode) {
         if (!branchId) return <div className="h-screen w-screen flex flex-col items-center justify-center bg-gray-900 text-white"><h1>Error</h1></div>;
         if (!selectedBranch) return <PageLoading />;
-        return <Suspense fallback={<PageLoading />}><QueueDisplay activeOrders={activeOrders} restaurantName={restaurantName} logoUrl={appLogoUrl || logoUrl} /></Suspense>;
+        return <Suspense fallback={<PageLoading />}><QueueDisplay activeOrders={filteredActiveOrders} restaurantName={restaurantName} logoUrl={appLogoUrl || logoUrl} /></Suspense>;
     }
 
     if (isCustomerMode || currentUser?.role === 'table') {
@@ -1185,8 +1240,8 @@ export const App: React.FC = () => {
             table={table}
             menuItems={menuItems}
             categories={categories}
-            activeOrders={activeOrders} 
-            allBranchOrders={activeOrders}
+            activeOrders={filteredActiveOrders} 
+            allBranchOrders={filteredActiveOrders}
             completedOrders={completedOrders}
             onPlaceOrder={async (items, name) => {
                 // Bridge to main app logic for consistency
@@ -1420,56 +1475,15 @@ export const App: React.FC = () => {
                     {currentView === 'kitchen' && (
                         <Suspense fallback={<PageLoading />}>
                             <KitchenView 
-                                activeOrders={activeOrders} 
-                                onCompleteOrder={async (orderId) => {
-                                    // "BUMP" means served/completed from kitchen view. 
-                                    await activeOrdersActions.update(orderId, { status: 'served' });
-                                }} 
+                                activeOrders={filteredActiveOrders} 
+                                onCompleteOrder={handleCompleteCooking}
                                 onStartCooking={async (orderId) => {
                                     await activeOrdersActions.update(orderId, { 
                                         status: 'cooking',
                                         cookingStartTime: Date.now()
                                     });
                                 }} 
-                                onPrintOrder={async (orderId) => {
-                                    const order = activeOrders.find(o => o.id === orderId);
-                                    if (!order) return;
-                                    
-                                    if (!printerConfig?.kitchen?.ipAddress) {
-                                         Swal.fire({
-                                            icon: 'warning',
-                                            title: 'ไม่ได้ตั้งค่าเครื่องพิมพ์',
-                                            text: 'กรุณาตั้งค่าเครื่องพิมพ์ครัวในเมนูตั้งค่าก่อน',
-                                            timer: 2000,
-                                            showConfirmButton: false
-                                        });
-                                        return;
-                                    }
-
-                                    try {
-                                        Swal.fire({
-                                            title: 'กำลังส่งคำสั่งพิมพ์...',
-                                            didOpen: () => { Swal.showLoading(); }
-                                        });
-                                        await printerService.printKitchenOrder(order, printerConfig.kitchen);
-                                        Swal.close();
-                                        Swal.fire({
-                                            icon: 'success',
-                                            title: 'ส่งพิมพ์เรียบร้อย',
-                                            toast: true,
-                                            position: 'top-end',
-                                            showConfirmButton: false,
-                                            timer: 1500
-                                        });
-                                    } catch (error: any) {
-                                        Swal.close();
-                                        Swal.fire({
-                                            icon: 'error',
-                                            title: 'พิมพ์ไม่สำเร็จ',
-                                            text: error.message
-                                        });
-                                    }
-                                }} 
+                                onPrintOrder={handlePrintKitchenOrder} 
                                 isAutoPrintEnabled={isAutoPrintEnabled} 
                                 onToggleAutoPrint={toggleAutoPrint} 
                             />
@@ -1478,10 +1492,10 @@ export const App: React.FC = () => {
                     {currentView === 'tables' && (
                         <TableLayout
                             tables={tables}
-                            activeOrders={activeOrders}
+                            activeOrders={filteredActiveOrders}
                             onTableSelect={setSelectedTableId}
                             onShowBill={(orderId) => {
-                                const order = activeOrders.find(o => o.id === orderId);
+                                const order = filteredActiveOrders.find(o => o.id === orderId);
                                 if (order) {
                                     setOrderForModal(order);
                                     setModalState(prev => ({ ...prev, isTableBill: true }));
@@ -1594,7 +1608,7 @@ export const App: React.FC = () => {
                 isEditMode={isEditMode} 
                 currentUser={currentUser} 
                 onInitiateCancel={(order) => {setOrderForModal(order); setModalState(prev => ({...prev, isCancelOrder: true, isTableBill: false}))}} 
-                activeOrders={activeOrders} 
+                activeOrders={filteredActiveOrders} 
                 onInitiateMerge={(order) => {setOrderForModal(order); setModalState(prev => ({...prev, isMergeBill: true, isTableBill: false}))}}
                 onMergeAndPay={handleMergeAndPay}
             />
@@ -1630,8 +1644,8 @@ export const App: React.FC = () => {
                     currentClosingTime={closingTime} 
                     onSavePrinterConfig={setPrinterConfig} 
                     menuItems={menuItems} 
-                    currentRecommendedMenuItemIds={recommendedMenuItemIds as number[]} 
-                    onSaveRecommendedItems={(ids: number[]) => setRecommendedMenuItemIds(ids)} 
+                    currentRecommendedMenuItemIds={recommendedMenuItemIds as any} 
+                    onSaveRecommendedItems={(ids: number[]) => setRecommendedMenuItemIds(ids as any)} 
                     deliveryProviders={deliveryProviders} 
                     onSaveDeliveryProviders={setDeliveryProviders}
                     currentRestaurantAddress={restaurantAddress}
@@ -1644,7 +1658,7 @@ export const App: React.FC = () => {
             <EditCompletedOrderModal isOpen={modalState.isEditCompleted} order={orderForModal as CompletedOrder | null} onClose={handleModalClose} onSave={async ({id, items}) => { if(newCompletedOrders.some(o => o.id === id)) { await newCompletedOrdersActions.update(id, { items }); } else { setLegacyCompletedOrders(prev => prev.map(o => o.id === id ? {...o, items} : o)); } }} menuItems={menuItems} />
             <UserManagerModal isOpen={modalState.isUserManager} onClose={handleModalClose} users={users} setUsers={setUsers} currentUser={currentUser!} branches={branches} isEditMode={isEditMode} tables={tables} />
             <BranchManagerModal isOpen={modalState.isBranchManager} onClose={handleModalClose} branches={branches} setBranches={setBranches} currentUser={currentUser} />
-            <MoveTableModal isOpen={modalState.isMoveTable} onClose={handleModalClose} order={orderForModal as ActiveOrder | null} tables={tables} activeOrders={activeOrders} onConfirmMove={handleConfirmMoveTable} floors={floors} />
+            <MoveTableModal isOpen={modalState.isMoveTable} onClose={handleModalClose} order={orderForModal as ActiveOrder | null} tables={tables} activeOrders={filteredActiveOrders} onConfirmMove={handleConfirmMoveTable} floors={floors} />
             <CancelOrderModal isOpen={modalState.isCancelOrder} onClose={handleModalClose} order={orderForModal as ActiveOrder | null} onConfirm={handleConfirmCancelOrder} />
             <CashBillModal 
                 isOpen={modalState.isCashBill} 
@@ -1663,7 +1677,7 @@ export const App: React.FC = () => {
             <ItemCustomizationModal isOpen={modalState.isCustomization} onClose={handleModalClose} item={itemToCustomize} onConfirm={handleConfirmCustomization} orderItemToEdit={orderItemToEdit} />
             <LeaveRequestModal isOpen={modalState.isLeaveRequest} onClose={handleModalClose} currentUser={currentUser} onSave={(req) => {const newId = Math.max(0, ...leaveRequests.map(r => r.id)) + 1; setLeaveRequests(prev => [...prev, {...req, id: newId, status: 'pending', branchId: selectedBranch!.id, submittedAt: Date.now()}]); handleModalClose(); }} leaveRequests={leaveRequests} initialDate={leaveRequestInitialDate} />
             <MenuSearchModal isOpen={modalState.isMenuSearch} onClose={handleModalClose} menuItems={menuItems} onSelectItem={handleAddItemToOrder} onToggleAvailability={handleToggleAvailability} />
-            <MergeBillModal isOpen={modalState.isMergeBill} onClose={handleModalClose} order={orderForModal as ActiveOrder} allActiveOrders={activeOrders} tables={tables} onConfirmMerge={handleMergeAndPay} />
+            <MergeBillModal isOpen={modalState.isMergeBill} onClose={handleModalClose} order={orderForModal as ActiveOrder} allActiveOrders={filteredActiveOrders} tables={tables} onConfirmMerge={handleMergeAndPay} />
         </div>
     );
 };

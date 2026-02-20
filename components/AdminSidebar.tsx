@@ -202,6 +202,7 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
       'leave': false
     });
     const logoInputRef = useRef<HTMLInputElement>(null);
+    const profileInputRef = useRef<HTMLInputElement>(null);
 
     // Printer Status
     const [kitchenStatus, setKitchenStatus] = useState<PrinterStatus>('idle');
@@ -273,20 +274,35 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
     };
 
     const handleProfilePictureEdit = () => {
-        Swal.fire({
-            title: 'เปลี่ยนรูปโปรไฟล์',
-            text: 'กรุณาวาง URL ของรูปภาพใหม่:',
-            input: 'url',
-            inputValue: currentUser.profilePictureUrl || '',
-            inputPlaceholder: 'https://example.com/image.png',
-            showCancelButton: true,
-            confirmButtonText: 'บันทึก',
-            cancelButtonText: 'ยกเลิก',
-        }).then((result) => {
-            if (result.isConfirmed && typeof result.value === 'string') {
-                onUpdateCurrentUser({ profilePictureUrl: result.value });
+        profileInputRef.current?.click();
+    };
+
+    const handleProfileFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file && file.type.startsWith('image/')) {
+            try {
+                Swal.fire({
+                    title: 'กำลังประมวลผลรูปภาพ...',
+                    allowOutsideClick: false,
+                    didOpen: () => { Swal.showLoading(); }
+                });
+                
+                const base64 = await compressImage(file);
+                
+                if (base64.length > 800000) { 
+                    Swal.fire('ไฟล์ใหญ่เกินไป', 'รูปภาพยังคงมีขนาดใหญ่เกินไป กรุณาใช้รูปที่เล็กกว่านี้', 'error');
+                    return;
+                }
+
+                onUpdateCurrentUser({ profilePictureUrl: base64 });
+                Swal.close();
+                Swal.fire({ toast: true, icon: 'success', title: 'อัปเดตโปรไฟล์สำเร็จ', position: 'top-end', showConfirmButton: false, timer: 1500 });
+
+            } catch (error) {
+                console.error("Profile upload failed", error);
+                Swal.fire('ผิดพลาด', 'ไม่สามารถประมวลผลรูปภาพได้', 'error');
             }
-        });
+        }
     };
     
     const handleLogoEdit = () => {
@@ -444,6 +460,14 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
                     type="file"
                     ref={logoInputRef}
                     onChange={handleLogoFileChange}
+                    accept="image/*"
+                    className="hidden"
+                />
+                
+                <input
+                    type="file"
+                    ref={profileInputRef}
+                    onChange={handleProfileFileChange}
                     accept="image/*"
                     className="hidden"
                 />
