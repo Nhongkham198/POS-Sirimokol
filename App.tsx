@@ -242,11 +242,9 @@ export const App: React.FC = () => {
     const [rawActiveOrders, activeOrdersActions] = useFirestoreCollection<ActiveOrder>(branchId, 'activeOrders');
     
     const activeOrders = useMemo(() => {
-        return rawActiveOrders.filter(o => o.status !== 'waiting' && o.status !== 'cooking' ? false : true || o.status === 'served');
+        return rawActiveOrders.filter(o => o.status === 'waiting' || o.status === 'cooking' || o.status === 'served');
     }, [rawActiveOrders]);
-    // Note: The logic above for activeOrders seems slightly modified from original which was:
-    // return rawActiveOrders.filter(o => o.status !== 'completed' && o.status !== 'cancelled');
-    // Reverting to robust logic:
+
     const filteredActiveOrders = useMemo(() => {
         return rawActiveOrders.filter(o => o.status !== 'completed' && o.status !== 'cancelled');
     }, [rawActiveOrders]);
