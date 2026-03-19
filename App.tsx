@@ -394,6 +394,9 @@ export const App: React.FC = () => {
                 customerCount: custCount || 1,
                 items: items,
                 orderType: isLineMan ? 'lineman' : (items.some(i => i.isTakeaway) ? 'takeaway' : 'dine-in'),
+                isLineMan: isLineMan, // Explicitly set for easier detection
+                deliveryOrderNumber: lineManNumber,
+                deliveryProviderName: deliveryProviderName,
                 taxRate: isTaxEnabled ? taxRate : 0,
                 taxAmount: taxVal,
                 placedBy: isCustomerMode ? 'Customer' : (currentUser?.username || 'Staff'),

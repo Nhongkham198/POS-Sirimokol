@@ -1,0 +1,46 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "System user with role-based access",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "staff", "table"] },
+        "pin": { "type": "string" }
+      },
+      "required": ["id", "name", "role"]
+    },
+    "Branch": {
+      "title": "Branch",
+      "description": "Restaurant branch configuration",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "name": { "type": "string" },
+        "address": { "type": "string" }
+      },
+      "required": ["id", "name"]
+    },
+    "ActiveOrder": {
+      "title": "ActiveOrder",
+      "description": "An order currently being processed",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "status": { "type": "string", "enum": ["waiting", "cooking", "served", "completed", "cancelled"] },
+        "items": { "type": "array" }
+      },
+      "required": ["id", "status", "items"]
+    }
+  },
+  "firestore": {
+    "/users/data": { "schema": "User[]", "description": "Global list of users" },
+    "/branches/data": { "schema": "Branch[]", "description": "Global list of branches" },
+    "/branches/{branchId}/menuItems/data": { "schema": "MenuItem[]", "description": "Branch menu items" },
+    "/branches/{branchId}/activeOrders/{orderId}": { "schema": "ActiveOrder", "description": "Individual active order" },
+    "/branches/{branchId}/completedOrders_v2/{orderId}": { "schema": "CompletedOrder", "description": "Individual completed order" },
+    "/branches/{branchId}/orderCounter/data": { "schema": "OrderCounter", "description": "Daily order counter" }
+  }
+}

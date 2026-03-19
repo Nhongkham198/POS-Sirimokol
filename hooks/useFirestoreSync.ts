@@ -1,10 +1,61 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { db } from '@/firebaseConfig';
+import { db, auth } from '@/firebaseConfig';
 import type { Table } from '@/types';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import Swal from 'sweetalert2';
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: any, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth?.currentUser?.uid,
+      email: auth?.currentUser?.email,
+      emailVerified: auth?.currentUser?.emailVerified,
+      isAnonymous: auth?.currentUser?.isAnonymous,
+      tenantId: auth?.currentUser?.tenantId,
+      providerInfo: auth?.currentUser?.providerData.map((provider: any) => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  // We don't throw here to avoid crashing the whole app, but we log it clearly
+}
 
 // Hook for Single Document Sync (Legacy/Config/Arrays)
 // Returns: [value, setValue, isSynced]
@@ -26,6 +77,26 @@ export function useFirestoreSync<T>(
     useEffect(() => {
         valueRef.current = value;
     }, [value]);
+
+    const getCacheKey = useCallback(() => {
+        const globalKeys = [
+            'users', 
+            'branches', 
+            'leaveRequests', 
+            'appLogoUrl', 
+            'logoUrl', 
+            'restaurantName', 
+            'restaurantAddress', 
+            'restaurantPhone', 
+            'taxId',
+            'qrCodeUrl',
+            'signatureUrl',
+            'notificationSoundUrl',
+            'staffCallSoundUrl'
+        ];
+        const isBranchSpecific = !globalKeys.includes(collectionKey);
+        return `fs_cache_${collectionKey}${isBranchSpecific && branchId ? `_${branchId}` : ''}`;
+    }, [branchId, collectionKey]);
 
     useEffect(() => {
         if (!db) {
@@ -56,10 +127,26 @@ export function useFirestoreSync<T>(
         setIsSynced(false);
         isReadyToWrite.current = false;
 
+        // --- LOCAL CACHE RECOVERY ---
+        const cacheKey = getCacheKey();
+        const cachedData = localStorage.getItem(cacheKey);
+        if (cachedData) {
+            try {
+                const parsed = JSON.parse(cachedData);
+                setValue(parsed);
+                // We don't set isSynced to true yet because we still want to wait for Firestore
+            } catch (e) {
+                console.error(`Failed to parse cache for ${collectionKey}`, e);
+            }
+        }
+        // ----------------------------
+
         if (isBranchSpecific && !branchId) {
-            setValue(currentInitialValue);
+            // If no branch selected, try to use cache or initial value
+            if (!cachedData) {
+                setValue(currentInitialValue);
+            }
             setIsSynced(true); 
-            // If no branch selected, we assume local mode, so writing is allowed locally
             isReadyToWrite.current = true; 
             return () => {};
         }
@@ -119,32 +206,37 @@ export function useFirestoreSync<T>(
                         }
 
                         setValue(valueToSet as T);
+                        // Update Cache
+                        localStorage.setItem(cacheKey, JSON.stringify(valueToSet));
                     } else if (data && Array.isArray(currentInitialValue)) {
                         // NON-STANDARD FORMAT (Flattened Object): { "0": {...}, "1": {...} }
-                        // If the expected type is Array, but 'value' field is missing, 
-                        // try to parse the document fields as array items.
                         console.warn(`[FirestoreSync] Detected flattened array structure for ${collectionKey}. converting to array.`);
                         const items = Object.values(data);
-                        // Simple check: Filter out non-object items if we expect objects (like tables)
-                        // Also, sometimes metadata fields might sneak in, though doc.data() usually just returns fields.
                         setValue(items as any as T);
+                        localStorage.setItem(cacheKey, JSON.stringify(items));
                     } else {
-                        // Doc exists but empty value and structure doesn't match expectation
-                        setValue(currentInitialValue);
+                        // Doc exists but empty value - use cache if available, otherwise initial
+                        if (!cachedData) {
+                            setValue(currentInitialValue);
+                        }
                     }
                 } else {
-                    // Doc doesn't exist yet. 
-                    setValue(currentInitialValue);
+                    // Doc doesn't exist yet - use cache if available, otherwise initial
+                    if (!cachedData) {
+                        setValue(currentInitialValue);
+                    }
                 }
                 setIsSynced(true); 
             },
             (error) => {
-                console.error(`Firestore sync error for ${collectionKey}:`, error);
+                handleFirestoreError(error, OperationType.GET, pathSegments.join('/'));
+                // On error, keep using whatever we have (cache or initial)
+                setIsSynced(true);
             }
         );
 
         return () => unsubscribe();
-    }, [branchId, collectionKey]);
+    }, [branchId, collectionKey, getCacheKey]);
 
     const setAndSyncValue = useCallback((newValue: React.SetStateAction<T>) => {
         // *** SAFETY LOCK CHECK ***
@@ -187,10 +279,42 @@ export function useFirestoreSync<T>(
             : [collectionKey, 'data'];
         
         const docRef = db.doc(pathSegments.join('/'));
+        const cacheKey = getCacheKey();
 
         setValue((prevValue) => {
             const resolvedValue = newValue instanceof Function ? newValue(prevValue) : newValue;
             
+            // --- DATA LOSS PROTECTION ---
+            // If we are about to save an empty array but we currently have many items, 
+            // and it's a critical collection like menuItems or tables, we should be careful.
+            const criticalKeys = ['menuItems', 'tables', 'categories', 'branches', 'users'];
+            if (
+                criticalKeys.includes(collectionKey) && 
+                Array.isArray(prevValue) && prevValue.length > 5 && 
+                Array.isArray(resolvedValue) && resolvedValue.length === 0
+            ) {
+                console.error(`[Data Loss Protection] Blocked attempt to clear ${collectionKey} with ${prevValue.length} items.`);
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'ตรวจพบความผิดปกติ!',
+                    text: `ระบบตรวจพบความพยายามลบข้อมูล ${collectionKey} ทั้งหมด (${prevValue.length} รายการ) หากคุณไม่ได้ตั้งใจลบ ข้อมูลจะไม่ถูกบันทึกเพื่อความปลอดภัย`,
+                    confirmButtonText: 'รับทราบ (ยกเลิกการลบ)',
+                    showCancelButton: true,
+                    cancelButtonText: 'ยืนยันการลบทั้งหมดจริงๆ'
+                }).then((result) => {
+                    if (result.isDismissed) {
+                        // User explicitly confirmed deletion via cancel button
+                        docRef.set({ value: [] }).catch(err => console.error(err));
+                        localStorage.setItem(cacheKey, JSON.stringify([]));
+                    }
+                });
+                return prevValue; // Revert to previous value locally
+            }
+            // ----------------------------
+
+            // Update Cache immediately for better responsiveness
+            localStorage.setItem(cacheKey, JSON.stringify(resolvedValue));
+
             // --- Size Check Logic ---
             try {
                 const jsonString = JSON.stringify({ value: resolvedValue });
@@ -226,7 +350,7 @@ export function useFirestoreSync<T>(
             // This effectively migrates any "flattened" legacy data to the correct format on next save.
             docRef.set({ value: resolvedValue })
                 .catch(err => {
-                    console.error(`Failed to write ${collectionKey} to Firestore:`, err);
+                    handleFirestoreError(err, OperationType.WRITE, pathSegments.join('/'));
                     let errorMessage = err.message;
                     if (err.code === 'resource-exhausted') {
                         errorMessage = 'โควต้าเต็ม หรือ ขนาดไฟล์ใหญ่เกิน 1MB';
@@ -272,7 +396,7 @@ export function useFirestoreCollection<T extends { id: number | string }>(
             });
             setData(items);
         }, error => {
-            console.error(`Error syncing collection ${collectionName}:`, error);
+            handleFirestoreError(error, OperationType.LIST, `branches/${branchId}/${collectionName}`);
         });
 
         return () => unsubscribe();
@@ -288,7 +412,7 @@ export function useFirestoreCollection<T extends { id: number | string }>(
                     lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
                 });
             } catch (err: any) {
-                console.error(`Failed to add to ${collectionName}:`, err);
+                handleFirestoreError(err, OperationType.WRITE, `branches/${branchId}/${collectionName}/${docId}`);
                 Swal.fire('บันทึกไม่สำเร็จ', 'ตรวจสอบการเชื่อมต่อหรือขนาดข้อมูล', 'error');
             }
         },
@@ -300,7 +424,7 @@ export function useFirestoreCollection<T extends { id: number | string }>(
                     lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
                 });
             } catch (err: any) {
-                console.error(`Failed to update ${collectionName}:`, err);
+                handleFirestoreError(err, OperationType.UPDATE, `branches/${branchId}/${collectionName}/${id}`);
                 Swal.fire('แก้ไขไม่สำเร็จ', 'ตรวจสอบการเชื่อมต่อหรือขนาดข้อมูล', 'error');
             }
         },
@@ -309,7 +433,7 @@ export function useFirestoreCollection<T extends { id: number | string }>(
             try {
                 await db.collection(`branches/${branchId}/${collectionName}`).doc(id.toString()).delete();
             } catch (err: any) {
-                console.error(`Failed to delete from ${collectionName}:`, err);
+                handleFirestoreError(err, OperationType.DELETE, `branches/${branchId}/${collectionName}/${id}`);
                 Swal.fire('ลบไม่สำเร็จ', 'เกิดข้อผิดพลาดในการเชื่อมต่อ', 'error');
             }
         }

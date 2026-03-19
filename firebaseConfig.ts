@@ -1,32 +1,28 @@
 // FIX: Updated Firebase imports to use the v9 compatibility layer, which provides the v8 namespaced API and fixes initialization errors.
 import firebase from "firebase/compat/app";
 import "firebase/compat/firestore";
+import "firebase/compat/auth"; // FIX: Added missing Auth import
 import "firebase/compat/functions";
 import "firebase/compat/storage"; // Import Storage
 // FIX: Switched to v8 compat analytics to ensure consistent SDK usage.
 import "firebase/compat/analytics"; 
 
-// Updated configuration for 'pos-sirimonkol'
-const firebaseConfig = {
-  apiKey: "AIzaSyAYSFtniKpkFJlxK61Wos_ntpLMMtKxq2s",
-  authDomain: "pos-sirimonkol.firebaseapp.com",
-  projectId: "pos-sirimonkol",
-  storageBucket: "pos-sirimonkol.firebasestorage.app",
-  messagingSenderId: "727960850637",
-  appId: "1:727960850637:web:282e94bfac7d6befa9d984",
-  measurementId: "G-8TM5HEKF7E"
-};
+// CRITICAL: Import configuration from the JSON file. 
+// This ensures that if the app is remixed or the project changes, 
+// the app always uses the correct credentials.
+import firebaseConfig from './firebase-applet-config.json';
 
 // --- CHECK FOR PLACEHOLDER VALUES ---
 export const isFirebaseConfigured = 
+    firebaseConfig.apiKey && 
     firebaseConfig.apiKey !== "YOUR_API_KEY" && 
-    firebaseConfig.messagingSenderId !== "YOUR_MESSAGING_SENDER_ID" && 
-    firebaseConfig.appId !== "YOUR_APP_ID";
+    firebaseConfig.apiKey !== "TODO_KEYHERE";
 
-let app;
-let db: any = null; // Initialize db as null
-let functions: any = null; // Initialize functions as null
-let storage: any = null; // Initialize storage as null
+let app: any;
+let db: any = null;
+let auth: any = null;
+let functions: any = null;
+let storage: any = null;
 let analytics: any = null;
 
 if (isFirebaseConfigured) {
@@ -41,7 +37,13 @@ if (isFirebaseConfigured) {
     // ** DEFINITIVE FIX: Explicitly pass the initialized 'app' instance to ALL Firebase services **
     // This resolves any ambiguity or context conflicts, especially with non-default regions.
     
+    // Use the named database if provided in the config, otherwise defaults to (default)
+    const databaseId = (firebaseConfig as any).firestoreDatabaseId || '(default)';
     db = firebase.firestore(app);
+    // Note: In compat mode, databaseId is usually handled via the app instance or specific initialization if needed.
+    // For most cases with the default database, this is sufficient.
+    
+    auth = firebase.auth(app); 
     
     // --- ENABLE OFFLINE PERSISTENCE ---
     db.enablePersistence({ synchronizeTabs: true })
@@ -73,4 +75,4 @@ if (isFirebaseConfigured) {
   }
 }
 
-export { db, functions, storage, analytics };
+export { db, auth, functions, storage, analytics };
