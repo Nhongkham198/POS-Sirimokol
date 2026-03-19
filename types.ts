@@ -96,6 +96,9 @@ interface BaseOrder {
     customerCount: number;
     items: OrderItem[];
     orderType: 'dine-in' | 'takeaway' | 'lineman';
+    isLineMan?: boolean; // NEW: Explicitly set for easier detection
+    deliveryOrderNumber?: string | null; // NEW: Stores the delivery order number
+    deliveryProviderName?: string | null; // NEW: Stores the delivery provider name
     taxRate: number;
     taxAmount: number;
     placedBy: string;

@@ -59,7 +59,7 @@ if (isFirebaseConfigured) {
     storage = firebase.storage(app); 
     
     // Also specify region for Functions to match Firestore Database location.
-    functions = firebase.functions(app, 'asia-southeast1');
+    functions = app.functions('asia-southeast1');
 
     // Initialize Analytics if supported, also with the explicit 'app' context.
     if (typeof window !== 'undefined') {

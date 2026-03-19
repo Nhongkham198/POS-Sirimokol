@@ -818,6 +818,47 @@ export const App: React.FC = () => {
         }
     };
 
+    const handleDeleteMenuItem = async (id: number) => {
+        const result = await Swal.fire({
+            title: 'ยืนยันการลบ?',
+            text: "คุณต้องการลบเมนูนี้ใช่หรือไม่?",
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#d33',
+            cancelButtonColor: '#3085d6',
+            confirmButtonText: 'ลบ',
+            cancelButtonText: 'ยกเลิก'
+        });
+
+        if (result.isConfirmed) {
+            setMenuItems(prev => prev.filter(item => item.id !== id));
+            Swal.fire('ลบแล้ว!', 'เมนูถูกลบเรียบร้อยแล้ว', 'success');
+        }
+    };
+
+    const handleUpdateCategory = (oldName: string, newName: string) => {
+        setCategories(prev => prev.map(c => c === oldName ? newName : c));
+        setMenuItems(prev => prev.map(item => item.category === oldName ? { ...item, category: newName } : item));
+    };
+
+    const handleDeleteCategory = (categoryName: string) => {
+        setCategories(prev => prev.filter(c => c !== categoryName));
+    };
+
+    const handleImportMenu = (importedItems: MenuItem[], newCategories: string[]) => {
+        setMenuItems(importedItems);
+        if (newCategories.length > 0) {
+            setCategories(prev => {
+                const combined = Array.from(new Set([...prev, ...newCategories]));
+                return combined;
+            });
+        }
+    };
+
+    const handleToggleVisibility = (id: number) => {
+        setMenuItems(prev => prev.map(m => m.id === id ? { ...m, isVisible: m.isVisible === false ? true : false } : m));
+    };
+
     const handleConfirmSplit = async (itemsToSplit: OrderItem[]) => {
         if (!orderForModal) return;
         // Verify it is an ActiveOrder (has status)
@@ -1334,13 +1375,13 @@ export const App: React.FC = () => {
                                     isEditMode={isEditMode} 
                                     onEditItem={(item) => { setItemToEdit(item); setModalState(prev => ({ ...prev, isMenuItem: true })); }} 
                                     onAddNewItem={() => { setItemToEdit(null); setModalState(prev => ({ ...prev, isMenuItem: true })); }} 
-                                    onDeleteItem={(id) => { /* logic */ }} 
-                                    onUpdateCategory={() => {}} 
-                                    onDeleteCategory={() => {}} 
+                                    onDeleteItem={handleDeleteMenuItem} 
+                                    onUpdateCategory={handleUpdateCategory} 
+                                    onDeleteCategory={handleDeleteCategory} 
                                     onAddCategory={handleAddCategory} 
-                                    onImportMenu={() => {}} 
+                                    onImportMenu={handleImportMenu} 
                                     recommendedMenuItemIds={recommendedMenuItemIds} 
-                                    onToggleVisibility={handleToggleAvailability}
+                                    onToggleVisibility={handleToggleVisibility}
                                     onToggleOrderSidebar={isDesktop ? () => setIsOrderSidebarVisible(!isOrderSidebarVisible) : undefined}
                                     isOrderSidebarVisible={isOrderSidebarVisible}
                                     cartItemCount={totalCartItemCount}
