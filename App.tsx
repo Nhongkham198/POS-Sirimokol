@@ -407,6 +407,11 @@ export const App: React.FC = () => {
             await activeOrdersActions.add(newOrder);
 
             if (!isCustomerMode) {
+                // Auto-print immediately for staff POS
+                if (isAutoPrintEnabled && printerConfig?.kitchen?.ipAddress) {
+                    handlePrintKitchenOrder(newOrder.id, true, newOrder);
+                }
+
                 setCurrentOrderItems([]);
                 setCustomerName('');
                 setCustomerCount(1);
@@ -496,6 +501,60 @@ export const App: React.FC = () => {
         }
     }, [staffCalls, currentUser, isCustomerMode, staffCallSoundUrl, isStaffCallsSynced]);
 
+    const handlePrintKitchenOrder = useCallback(async (orderId: number, silent: boolean = false, orderOverride?: ActiveOrder) => {
+        const order = orderOverride || filteredActiveOrders.find(o => o.id === orderId);
+        if (!order) return;
+        
+        if (!printerConfig?.kitchen?.ipAddress) {
+            if (!silent) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'ไม่ได้ตั้งค่าเครื่องพิมพ์',
+                    text: 'กรุณาตั้งค่าเครื่องพิมพ์ครัวในเมนูตั้งค่าก่อน',
+                    timer: 2000,
+                    showConfirmButton: false
+                });
+            }
+            return;
+        }
+
+        try {
+            if (!silent) {
+                Swal.fire({
+                    title: 'กำลังส่งคำสั่งพิมพ์...',
+                    didOpen: () => { Swal.showLoading(); }
+                });
+            }
+            await printerService.printKitchenOrder(order, printerConfig.kitchen);
+            
+            // Update printed status in Firestore to prevent duplicate auto-prints
+            await activeOrdersActions.update(order.id, { isPrintedToKitchen: true });
+
+            if (!silent) {
+                Swal.close();
+                Swal.fire({
+                    icon: 'success',
+                    title: 'ส่งพิมพ์เรียบร้อย',
+                    toast: true,
+                    position: 'top-end',
+                    showConfirmButton: false,
+                    timer: 1500
+                });
+            }
+        } catch (error: any) {
+            if (!silent) {
+                Swal.close();
+                Swal.fire({
+                    icon: 'error',
+                    title: 'พิมพ์ไม่สำเร็จ',
+                    text: error.message
+                });
+            } else {
+                console.error("Auto-print error", error);
+            }
+        }
+    }, [filteredActiveOrders, printerConfig, activeOrdersActions]);
+
     // --- NEW: Order Notification Listener ---
     const prevActiveOrdersRef = useRef<ActiveOrder[]>([]);
     const isActiveOrdersFirstLoad = useRef(true);
@@ -512,8 +571,6 @@ export const App: React.FC = () => {
             if (currentWaitingOrders.length > 0) {
                  prevActiveOrdersRef.current = currentWaitingOrders;
             }
-            // Only set first load to false if we actually have data or if sync is likely done. 
-            // Since activeOrders updates dynamically, let's just set it false after first run.
             isActiveOrdersFirstLoad.current = false;
             return;
         }
@@ -524,16 +581,12 @@ export const App: React.FC = () => {
 
         if (newOrders.length > 0) {
             // 4. Check recency (ignore orders older than 5 mins to prevent spam on reconnect)
-            // Use orderTime
             const hasRecent = newOrders.some(o => (Date.now() - o.orderTime) < 300000);
 
             if (hasRecent) {
-                // Check if notification is enabled
+                // Sound and Swal Notification
                 if (isOrderNotificationsEnabled) {
-                     // Play Sound
                      playAudio(notificationSoundUrl);
-     
-                     // Show Swal Notification
                      Swal.fire({
                          title: 'มีออเดอร์ใหม่!',
                          text: `${newOrders.length} รายการใหม่ส่งเข้าครัว`,
@@ -545,13 +598,22 @@ export const App: React.FC = () => {
                          showConfirmButton: false
                      });
                 }
+
+                // Auto Print to Kitchen
+                if (isAutoPrintEnabled && printerConfig?.kitchen?.ipAddress) {
+                    newOrders.forEach(order => {
+                        if (!order.isPrintedToKitchen) {
+                            handlePrintKitchenOrder(order.id, true);
+                        }
+                    });
+                }
             }
         }
 
         // Update ref
         prevActiveOrdersRef.current = currentWaitingOrders;
 
-    }, [filteredActiveOrders, currentUser, isCustomerMode, notificationSoundUrl, isOrderNotificationsEnabled]);
+    }, [filteredActiveOrders, currentUser, isCustomerMode, notificationSoundUrl, isOrderNotificationsEnabled, isAutoPrintEnabled, printerConfig, handlePrintKitchenOrder]);
 
 
     // --- Kitchen Handlers (Start, Complete, Print) ---
@@ -616,45 +678,6 @@ export const App: React.FC = () => {
         }
     };
 
-    const handlePrintKitchenOrder = async (orderId: number) => {
-        const order = filteredActiveOrders.find(o => o.id === orderId);
-        if (!order) return;
-        
-        if (!printerConfig?.kitchen?.ipAddress) {
-             Swal.fire({
-                icon: 'warning',
-                title: 'ไม่ได้ตั้งค่าเครื่องพิมพ์',
-                text: 'กรุณาตั้งค่าเครื่องพิมพ์ครัวในเมนูตั้งค่าก่อน',
-                timer: 2000,
-                showConfirmButton: false
-            });
-            return;
-        }
-
-        try {
-            Swal.fire({
-                title: 'กำลังส่งคำสั่งพิมพ์...',
-                didOpen: () => { Swal.showLoading(); }
-            });
-            await printerService.printKitchenOrder(order, printerConfig.kitchen);
-            Swal.close();
-            Swal.fire({
-                icon: 'success',
-                title: 'ส่งพิมพ์เรียบร้อย',
-                toast: true,
-                position: 'top-end',
-                showConfirmButton: false,
-                timer: 1500
-            });
-        } catch (error: any) {
-            Swal.close();
-            Swal.fire({
-                icon: 'error',
-                title: 'พิมพ์ไม่สำเร็จ',
-                text: error.message
-            });
-        }
-    };
 
     // ... (Keep badge calculations) ...
     const waitingBadgeCount = useMemo(() => filteredActiveOrders.filter(o => o.status === 'waiting').length, [filteredActiveOrders]);
