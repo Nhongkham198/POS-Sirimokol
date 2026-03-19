@@ -32,6 +32,7 @@ interface AdminSidebarProps {
     isOrderNotificationsEnabled: boolean;
     onToggleOrderNotifications: () => void;
     printerConfig: PrinterConfig | null; // Added prop
+    branchesCount?: number;
 }
 
 // --- Image Compression Helper ---
@@ -195,7 +196,8 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
     onUpdateRestaurantName,
     isOrderNotificationsEnabled,
     onToggleOrderNotifications,
-    printerConfig
+    printerConfig,
+    branchesCount = 0
 }) => {
     const [openMenus, setOpenMenus] = useState<Record<string, boolean>>({
       'stock': true,
@@ -378,7 +380,7 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
                                 ) : (
                                     <span className="text-base font-semibold text-white leading-tight block truncate">{restaurantName}</span>
                                 )}
-                                <p className="text-xs text-gray-400 truncate">{branchName}</p>
+                                {branchesCount > 1 && <p className="text-xs text-gray-400 truncate">{branchName}</p>}
                             </div>
                         </div>
                     )}
