@@ -204,7 +204,12 @@ export const App: React.FC = () => {
     });
     
     const urlBranchId = useMemo(() => new URLSearchParams(window.location.search).get('branchId'), []);
-    const branchId = selectedBranch ? selectedBranch.id.toString() : (isCustomerMode || isQueueMode) && urlBranchId ? urlBranchId : null;
+    
+    // FIX: Prioritize urlBranchId for customers to ensure they always order to the correct branch from QR code
+    const branchId = useMemo(() => {
+        if ((isCustomerMode || isQueueMode) && urlBranchId) return urlBranchId;
+        return selectedBranch ? selectedBranch.id.toString() : null;
+    }, [isCustomerMode, isQueueMode, urlBranchId, selectedBranch]);
 
     const shouldLoadHeavyData = useMemo(() => {
         return currentUser && currentUser.role !== 'table' && !isCustomerMode;
@@ -213,9 +218,9 @@ export const App: React.FC = () => {
     const heavyDataBranchId = shouldLoadHeavyData ? branchId : null;
 
     useEffect(() => {
-        if ((isCustomerMode || isQueueMode) && !selectedBranch && branches.length > 0 && urlBranchId) {
+        if ((isCustomerMode || isQueueMode) && branches.length > 0 && urlBranchId) {
             const b = branches.find(br => br.id.toString() === urlBranchId);
-            if (b) {
+            if (b && (!selectedBranch || selectedBranch.id.toString() !== urlBranchId)) {
                 setSelectedBranch(b);
                 if (isCustomerMode) {
                     localStorage.setItem('customerSelectedBranch', JSON.stringify(b));
@@ -385,6 +390,7 @@ export const App: React.FC = () => {
 
             const newOrder: ActiveOrder = {
                 id: Date.now(),
+                branchId: Number(branchId), // Ensure branchId is included
                 orderNumber: nextOrderNum, 
                 manualOrderNumber: lineManNumber || null,
                 tableId: tId,
