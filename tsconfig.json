@@ -22,9 +22,6 @@
       ]
     },
     "allowImportingTsExtensions": true,
-    "resolveJsonModule": true,
-    "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
     "noEmit": true
   }
 }
