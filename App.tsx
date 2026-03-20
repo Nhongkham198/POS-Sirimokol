@@ -245,7 +245,9 @@ export const App: React.FC = () => {
     // FIX: Prioritize urlBranchId for customers to ensure they always order to the correct branch from QR code
     const branchId = useMemo(() => {
         const id = ((isCustomerMode || isQueueMode) && urlBranchId) ? urlBranchId : (selectedBranch ? selectedBranch.id.toString() : null);
-        console.log(`[Debug] Computed branchId: ${id}`, { isCustomerMode, urlBranchId, selectedBranchId: selectedBranch?.id });
+        if (id) {
+            console.log(`[System] Active Branch ID: ${id} (${isCustomerMode ? 'Customer' : 'Staff'} Mode)`);
+        }
         return id;
     }, [isCustomerMode, isQueueMode, urlBranchId, selectedBranch]);
 
@@ -457,7 +459,7 @@ export const App: React.FC = () => {
 
             const newOrder: ActiveOrder = {
                 id: Date.now(),
-                branchId: Number(branchId), // Ensure branchId is included
+                branchId: String(branchId), // Store as string for consistency
                 orderNumber: nextOrderNum, 
                 manualOrderNumber: lineManNumber || null,
                 tableId: tId,
@@ -467,7 +469,7 @@ export const App: React.FC = () => {
                 customerCount: custCount || 1,
                 items: items,
                 orderType: isLineMan ? 'lineman' : (items.some(i => i.isTakeaway) ? 'takeaway' : 'dine-in'),
-                isLineMan: isLineMan, // Explicitly set for easier detection
+                isLineMan: isLineMan, 
                 deliveryOrderNumber: lineManNumber,
                 deliveryProviderName: deliveryProviderName,
                 taxRate: isTaxEnabled ? taxRate : 0,
@@ -477,7 +479,9 @@ export const App: React.FC = () => {
                 orderTime: Date.now(),
             };
 
+            console.log(`[Order] Saving new order #${nextOrderNum} to Firestore...`);
             await activeOrdersActions.add(newOrder);
+            console.log(`[Order] Successfully saved order #${nextOrderNum}`);
 
             if (!isCustomerMode) {
                 // Auto-print immediately for staff POS

@@ -43,7 +43,10 @@ export const KitchenView: React.FC<KitchenViewProps> = ({
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-orange-500" viewBox="0 0 20 20" fill="currentColor">
                         <path fillRule="evenodd" d="M17.707 9.293a1 1 0 010 1.414l-7 7a1 1 0 01-1.414 0l-7-7A.997.997 0 012 10V5a3 3 0 013-3h10a3 3 0 013 3v5a.997.997 0 01-.293.707zM5 6a1 1 0 100 2 1 1 0 000-2zm3 0a1 1 0 100 2 1 1 0 000-2zm3 0a1 1 0 100 2 1 1 0 000-2z" clipRule="evenodd" />
                     </svg>
-                    <h2 className="text-lg font-bold text-white tracking-wide">หน้าจอครัว (KDS)</h2>
+                    <div className="flex flex-col">
+                        <h2 className="text-lg font-bold text-white tracking-wide leading-none">หน้าจอครัว (KDS)</h2>
+                        <span className="text-[10px] text-gray-400 font-mono">Branch ID: {activeOrders[0]?.branchId || 'Syncing...'}</span>
+                    </div>
                 </div>
 
                 {/* Auto Print Toggle Restored */}
