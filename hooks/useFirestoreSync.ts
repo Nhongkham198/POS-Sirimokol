@@ -385,18 +385,24 @@ export function useFirestoreCollection<T extends { id: number | string }>(
     const [data, setData] = useState<T[]>([]);
 
     useEffect(() => {
-        if (!db || !branchId) return;
+        if (!db || !branchId) {
+            console.log(`[Debug] useFirestoreCollection: Missing db or branchId`, { branchId, collectionName });
+            return;
+        }
 
-        const collectionRef = db.collection(`branches/${branchId}/${collectionName}`);
+        const path = `branches/${branchId}/${collectionName}`;
+        console.log(`[Debug] useFirestoreCollection: Listening to path: ${path}`);
+        const collectionRef = db.collection(path);
 
         const unsubscribe = collectionRef.onSnapshot(snapshot => {
             const items: T[] = [];
             snapshot.forEach(doc => {
                 items.push(doc.data() as T);
             });
+            console.log(`[Debug] useFirestoreCollection: Received ${items.length} items from ${path}`);
             setData(items);
         }, error => {
-            handleFirestoreError(error, OperationType.LIST, `branches/${branchId}/${collectionName}`);
+            handleFirestoreError(error, OperationType.LIST, path);
         });
 
         return () => unsubscribe();
@@ -406,6 +412,8 @@ export function useFirestoreCollection<T extends { id: number | string }>(
         add: async (item: T) => {
             if (!db || !branchId) return;
             const docId = item.id.toString();
+            const fullPath = `branches/${branchId}/${collectionName}/${docId}`;
+            console.log(`[Debug] useFirestoreCollection: Adding item to ${fullPath}`, item);
             try {
                 await db.collection(`branches/${branchId}/${collectionName}`).doc(docId).set({
                     ...item,

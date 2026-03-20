@@ -24,6 +24,7 @@ export const KitchenView: React.FC<KitchenViewProps> = ({
     // on staff devices, regardless of the current view.
 
     const { waitingOrders, cookingOrders } = useMemo(() => {
+        console.log(`[Debug] KitchenView received activeOrders: ${activeOrders.length}`, activeOrders.map(o => ({ id: o.id, status: o.status })));
         const waiting = activeOrders
             .filter(o => o.status === 'waiting')
             .sort((a, b) => a.orderTime - b.orderTime);

@@ -87,6 +87,11 @@ export const App: React.FC = () => {
     // Destructure isSynced to control global loading
     const [users, setUsers, isUsersSynced] = useFirestoreSync<User[]>(null, 'users', DEFAULT_USERS);
     const [branches, setBranches, isBranchesSynced] = useFirestoreSync<Branch[]>(null, 'branches', DEFAULT_BRANCHES);
+    useEffect(() => {
+        if (isBranchesSynced) {
+            console.log(`[Debug] Branches synced: ${branches.length} branches found`, branches.map(b => ({ id: b.id, name: b.name })));
+        }
+    }, [branches, isBranchesSynced]);
     
     const [currentUser, setCurrentUser] = useState<User | null>(() => {
         const storedUser = localStorage.getItem('currentUser');
@@ -207,8 +212,9 @@ export const App: React.FC = () => {
     
     // FIX: Prioritize urlBranchId for customers to ensure they always order to the correct branch from QR code
     const branchId = useMemo(() => {
-        if ((isCustomerMode || isQueueMode) && urlBranchId) return urlBranchId;
-        return selectedBranch ? selectedBranch.id.toString() : null;
+        const id = ((isCustomerMode || isQueueMode) && urlBranchId) ? urlBranchId : (selectedBranch ? selectedBranch.id.toString() : null);
+        console.log(`[Debug] Computed branchId: ${id}`, { isCustomerMode, urlBranchId, selectedBranchId: selectedBranch?.id });
+        return id;
     }, [isCustomerMode, isQueueMode, urlBranchId, selectedBranch]);
 
     const shouldLoadHeavyData = useMemo(() => {
@@ -246,6 +252,7 @@ export const App: React.FC = () => {
     }, [rawActiveOrders]);
 
     const filteredActiveOrders = useMemo(() => {
+        console.log(`[Debug] rawActiveOrders count: ${rawActiveOrders.length}`, rawActiveOrders.map(o => ({ id: o.id, status: o.status, branchId: o.branchId })));
         // Ensure we include 'waiting' status which is what new orders get
         return rawActiveOrders.filter(o => 
             o.status === 'waiting' || 
@@ -364,7 +371,8 @@ export const App: React.FC = () => {
         }
 
         setIsPlacingOrder(true);
-        console.log(`[Order] Placing order for branch ${branchId}`, { items, custName, tableOverride });
+        const orderPath = `branches/${branchId}/activeOrders`;
+        console.log(`[Order] Placing order at ${orderPath}`, { items, custName, tableOverride });
         try {
             // --- DAILY RESET LOGIC ---
             const d = new Date();
