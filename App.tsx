@@ -357,7 +357,14 @@ export const App: React.FC = () => {
         lineManNumber?: string, 
         deliveryProviderName?: string
     ) => {
+        if (!branchId) {
+            console.error("Cannot place order: branchId is missing");
+            Swal.fire('Error', 'ไม่พบข้อมูลสาขา กรุณาลองใหม่อีกครั้ง', 'error');
+            return;
+        }
+
         setIsPlacingOrder(true);
+        console.log(`[Order] Placing order for branch ${branchId}`, { items, custName, tableOverride });
         try {
             // --- DAILY RESET LOGIC ---
             const d = new Date();
@@ -436,7 +443,7 @@ export const App: React.FC = () => {
         } finally {
             setIsPlacingOrder(false);
         }
-    }, [orderCounter, isTaxEnabled, taxRate, isCustomerMode, currentUser, activeOrdersActions, customerTableId, tables, setOrderCounter]);
+    }, [branchId, orderCounter, isTaxEnabled, taxRate, isCustomerMode, currentUser, activeOrdersActions, customerTableId, tables, setOrderCounter]);
 
     // --- Staff Call Handler ---
     const handleStaffCall = useCallback(async (tableObj: Table, custName: string) => {
@@ -1320,7 +1327,7 @@ export const App: React.FC = () => {
     // GLOBAL LOADING: If critical data isn't synced yet, show loading
     const isCriticalDataSynced = isUsersSynced && isBranchesSynced && isMenuSynced && isTablesSynced;
     
-    if (!isCriticalDataSynced && !isCustomerMode && !isQueueMode) {
+    if (!isCriticalDataSynced) {
         return <PageLoading message="กำลังซิงค์ข้อมูล... กรุณารอสักครู่เพื่อความปลอดภัยของข้อมูล" />;
     }
 
@@ -1342,9 +1349,11 @@ export const App: React.FC = () => {
             completedOrders={completedOrders}
             onPlaceOrder={async (items, name) => {
                 // Bridge to main app logic for consistency
-                return handlePlaceOrder(items, name, Number(branchId), table, false); 
+                // Fix: Pass 1 as default customer count, not branchId
+                return handlePlaceOrder(items, name, 1, table, false); 
             }}
             onStaffCall={(t, name) => handleStaffCall(t, name)}
+            branchId={branchId}
             recommendedMenuItemIds={recommendedMenuItemIds}
             logoUrl={logoUrl}
             restaurantName={restaurantName}
