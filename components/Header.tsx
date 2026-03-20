@@ -30,7 +30,6 @@ interface HeaderProps {
     printerConfig: PrinterConfig | null; // Added prop
     isAutoPrintEnabled: boolean; // Add this
     onToggleAutoPrint: () => void; // Add this
-    branchesCount?: number;
 }
 
 const NavButton: React.FC<{
@@ -112,8 +111,7 @@ export const Header: React.FC<HeaderProps> = ({
     branchName, onChangeBranch, onManageBranches,
     printerConfig,
     isAutoPrintEnabled,
-    onToggleAutoPrint,
-    branchesCount = 0
+    onToggleAutoPrint
 }) => {
     
     const isAdmin = currentUser?.role === 'admin';
@@ -221,7 +219,7 @@ export const Header: React.FC<HeaderProps> = ({
                             <h1 className="text-xl font-bold text-gray-800">{restaurantName}</h1>
                         )}
                         <div className="flex items-center gap-2">
-                            {branchesCount > 1 && <p className="text-sm text-gray-800 font-medium">{branchName}</p>}
+                            <p className="text-sm text-gray-800 font-medium">{branchName}</p>
                             {/* Printer Status Indicators */}
                             <div className="flex items-center gap-1 ml-2 pl-2 border-l border-gray-300">
                                 <PrinterStatusIndicator type="kitchen" status={kitchenPrinterStatus} onClick={() => checkPrinter('kitchen')} />

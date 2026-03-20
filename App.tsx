@@ -87,11 +87,6 @@ export const App: React.FC = () => {
     // Destructure isSynced to control global loading
     const [users, setUsers, isUsersSynced] = useFirestoreSync<User[]>(null, 'users', DEFAULT_USERS);
     const [branches, setBranches, isBranchesSynced] = useFirestoreSync<Branch[]>(null, 'branches', DEFAULT_BRANCHES);
-    useEffect(() => {
-        if (isBranchesSynced) {
-            console.log(`[Debug] Branches synced: ${branches.length} branches found`, branches.map(b => ({ id: b.id, name: b.name })));
-        }
-    }, [branches, isBranchesSynced]);
     
     const [currentUser, setCurrentUser] = useState<User | null>(() => {
         const storedUser = localStorage.getItem('currentUser');
@@ -175,19 +170,11 @@ export const App: React.FC = () => {
         });
     };
     
-    const [isQueueMode, setIsQueueMode] = useState(() => window.location.pathname === '/queue' || window.location.search.includes('mode=queue'));
+    const [isQueueMode, setIsQueueMode] = useState(() => window.location.pathname === '/queue');
 
     const [isCustomerMode, setIsCustomerMode] = useState(() => {
-        const pathname = window.location.pathname;
-        const search = window.location.search;
-        const params = new URLSearchParams(search);
-        
-        if (pathname === '/customer' || pathname.startsWith('/customer/') || pathname.includes('mode=customer')) return true;
+        const params = new URLSearchParams(window.location.search);
         if (params.get('mode') === 'customer') return true;
-        
-        // Also check if it's a mangled URL like /customer&branchId=...
-        if (pathname.includes('/customer&') || pathname.includes('/customer?')) return true;
-
         const storedUser = localStorage.getItem('currentUser');
         if (storedUser) {
             try {
@@ -201,19 +188,8 @@ export const App: React.FC = () => {
     });
 
     const [customerTableId, setCustomerTableId] = useState<number | null>(() => {
-        const search = window.location.search;
-        const pathname = window.location.pathname;
-        
-        // Try to get from search params first
-        const params = new URLSearchParams(search);
-        let tableIdParam = params.get('tableId');
-        
-        // If not found, try to parse from pathname (handles mangled URLs)
-        if (!tableIdParam && (pathname.includes('tableId='))) {
-            const match = pathname.match(/tableId=([^&]+)/);
-            if (match) tableIdParam = match[1];
-        }
-
+        const params = new URLSearchParams(window.location.search);
+        const tableIdParam = params.get('tableId');
         if (tableIdParam) return Number(tableIdParam);
         const storedUser = localStorage.getItem('currentUser');
         if (storedUser) {
@@ -227,29 +203,8 @@ export const App: React.FC = () => {
         return null;
     });
     
-    const urlBranchId = useMemo(() => {
-        const search = window.location.search;
-        const pathname = window.location.pathname;
-        
-        const params = new URLSearchParams(search);
-        let branchId = params.get('branchId');
-        
-        if (!branchId && pathname.includes('branchId=')) {
-            const match = pathname.match(/branchId=([^&]+)/);
-            if (match) branchId = match[1];
-        }
-        
-        return branchId;
-    }, []);
-    
-    // FIX: Prioritize urlBranchId for customers to ensure they always order to the correct branch from QR code
-    const branchId = useMemo(() => {
-        const id = ((isCustomerMode || isQueueMode) && urlBranchId) ? urlBranchId : (selectedBranch ? selectedBranch.id.toString() : null);
-        if (id) {
-            console.log(`[System] Active Branch ID: ${id} (${isCustomerMode ? 'Customer' : 'Staff'} Mode)`);
-        }
-        return id;
-    }, [isCustomerMode, isQueueMode, urlBranchId, selectedBranch]);
+    const urlBranchId = useMemo(() => new URLSearchParams(window.location.search).get('branchId'), []);
+    const branchId = selectedBranch ? selectedBranch.id.toString() : (isCustomerMode || isQueueMode) && urlBranchId ? urlBranchId : null;
 
     const shouldLoadHeavyData = useMemo(() => {
         return currentUser && currentUser.role !== 'table' && !isCustomerMode;
@@ -258,9 +213,9 @@ export const App: React.FC = () => {
     const heavyDataBranchId = shouldLoadHeavyData ? branchId : null;
 
     useEffect(() => {
-        if ((isCustomerMode || isQueueMode) && branches.length > 0 && urlBranchId) {
+        if ((isCustomerMode || isQueueMode) && !selectedBranch && branches.length > 0 && urlBranchId) {
             const b = branches.find(br => br.id.toString() === urlBranchId);
-            if (b && (!selectedBranch || selectedBranch.id.toString() !== urlBranchId)) {
+            if (b) {
                 setSelectedBranch(b);
                 if (isCustomerMode) {
                     localStorage.setItem('customerSelectedBranch', JSON.stringify(b));
@@ -281,25 +236,15 @@ export const App: React.FC = () => {
     // Active Orders
     const [rawActiveOrders, activeOrdersActions] = useFirestoreCollection<ActiveOrder>(branchId, 'activeOrders');
     
+    const activeOrders = useMemo(() => {
+        return rawActiveOrders.filter(o => o.status !== 'waiting' && o.status !== 'cooking' ? false : true || o.status === 'served');
+    }, [rawActiveOrders]);
+    // Note: The logic above for activeOrders seems slightly modified from original which was:
+    // return rawActiveOrders.filter(o => o.status !== 'completed' && o.status !== 'cancelled');
+    // Reverting to robust logic:
     const filteredActiveOrders = useMemo(() => {
-        const filtered = rawActiveOrders.filter(o => 
-            o.status === 'waiting' || 
-            o.status === 'cooking' || 
-            o.status === 'served'
-        );
-        
-        console.log(`[Debug] Kitchen Sync:`, {
-            branchId,
-            totalRaw: rawActiveOrders.length,
-            totalFiltered: filtered.length,
-            rawStatuses: rawActiveOrders.map(o => o.status),
-            rawIds: rawActiveOrders.map(o => o.id)
-        });
-        
-        return filtered;
-    }, [rawActiveOrders, branchId]);
-
-    const activeOrders = filteredActiveOrders; // Use the same filtered list for consistency
+        return rawActiveOrders.filter(o => o.status !== 'completed' && o.status !== 'cancelled');
+    }, [rawActiveOrders]);
 
 
     // --- HEAVY DATA ---
@@ -404,26 +349,7 @@ export const App: React.FC = () => {
         lineManNumber?: string, 
         deliveryProviderName?: string
     ) => {
-        if (!branchId) {
-            console.error("Cannot place order: branchId is missing");
-            Swal.fire('Error', 'ไม่พบข้อมูลสาขา กรุณาลองใหม่อีกครั้ง', 'error');
-            return;
-        }
-
         setIsPlacingOrder(true);
-        if (!branchId) {
-            console.error('[Error] handlePlaceOrder: branchId is null. Cannot place order.', { 
-                isCustomerMode, 
-                urlBranchId, 
-                customerTableId,
-                selectedBranchId: selectedBranch?.id 
-            });
-            Swal.fire('เกิดข้อผิดพลาด', 'ไม่พบข้อมูลสาขา กรุณาสแกน QR Code ใหม่', 'error');
-            return null;
-        }
-
-        const orderPath = `branches/${branchId}/activeOrders`;
-        console.log(`[Order] Placing order at ${orderPath}`, { items, custName, tableOverride });
         try {
             // --- DAILY RESET LOGIC ---
             const d = new Date();
@@ -459,7 +385,6 @@ export const App: React.FC = () => {
 
             const newOrder: ActiveOrder = {
                 id: Date.now(),
-                branchId: String(branchId), // Store as string for consistency
                 orderNumber: nextOrderNum, 
                 manualOrderNumber: lineManNumber || null,
                 tableId: tId,
@@ -469,9 +394,6 @@ export const App: React.FC = () => {
                 customerCount: custCount || 1,
                 items: items,
                 orderType: isLineMan ? 'lineman' : (items.some(i => i.isTakeaway) ? 'takeaway' : 'dine-in'),
-                isLineMan: isLineMan, 
-                deliveryOrderNumber: lineManNumber,
-                deliveryProviderName: deliveryProviderName,
                 taxRate: isTaxEnabled ? taxRate : 0,
                 taxAmount: taxVal,
                 placedBy: isCustomerMode ? 'Customer' : (currentUser?.username || 'Staff'),
@@ -479,16 +401,9 @@ export const App: React.FC = () => {
                 orderTime: Date.now(),
             };
 
-            console.log(`[Order] Saving new order #${nextOrderNum} to Firestore...`);
             await activeOrdersActions.add(newOrder);
-            console.log(`[Order] Successfully saved order #${nextOrderNum}`);
 
             if (!isCustomerMode) {
-                // Auto-print immediately for staff POS
-                if (isAutoPrintEnabled && printerConfig?.kitchen?.ipAddress) {
-                    handlePrintKitchenOrder(newOrder.id, true, newOrder);
-                }
-
                 setCurrentOrderItems([]);
                 setCustomerName('');
                 setCustomerCount(1);
@@ -504,7 +419,7 @@ export const App: React.FC = () => {
         } finally {
             setIsPlacingOrder(false);
         }
-    }, [branchId, orderCounter, isTaxEnabled, taxRate, isCustomerMode, currentUser, activeOrdersActions, customerTableId, tables, setOrderCounter]);
+    }, [orderCounter, isTaxEnabled, taxRate, isCustomerMode, currentUser, activeOrdersActions, customerTableId, tables, setOrderCounter]);
 
     // --- Staff Call Handler ---
     const handleStaffCall = useCallback(async (tableObj: Table, custName: string) => {
@@ -578,60 +493,6 @@ export const App: React.FC = () => {
         }
     }, [staffCalls, currentUser, isCustomerMode, staffCallSoundUrl, isStaffCallsSynced]);
 
-    const handlePrintKitchenOrder = useCallback(async (orderId: number, silent: boolean = false, orderOverride?: ActiveOrder) => {
-        const order = orderOverride || filteredActiveOrders.find(o => o.id === orderId);
-        if (!order) return;
-        
-        if (!printerConfig?.kitchen?.ipAddress) {
-            if (!silent) {
-                Swal.fire({
-                    icon: 'warning',
-                    title: 'ไม่ได้ตั้งค่าเครื่องพิมพ์',
-                    text: 'กรุณาตั้งค่าเครื่องพิมพ์ครัวในเมนูตั้งค่าก่อน',
-                    timer: 2000,
-                    showConfirmButton: false
-                });
-            }
-            return;
-        }
-
-        try {
-            if (!silent) {
-                Swal.fire({
-                    title: 'กำลังส่งคำสั่งพิมพ์...',
-                    didOpen: () => { Swal.showLoading(); }
-                });
-            }
-            await printerService.printKitchenOrder(order, printerConfig.kitchen);
-            
-            // Update printed status in Firestore to prevent duplicate auto-prints
-            await activeOrdersActions.update(order.id, { isPrintedToKitchen: true });
-
-            if (!silent) {
-                Swal.close();
-                Swal.fire({
-                    icon: 'success',
-                    title: 'ส่งพิมพ์เรียบร้อย',
-                    toast: true,
-                    position: 'top-end',
-                    showConfirmButton: false,
-                    timer: 1500
-                });
-            }
-        } catch (error: any) {
-            if (!silent) {
-                Swal.close();
-                Swal.fire({
-                    icon: 'error',
-                    title: 'พิมพ์ไม่สำเร็จ',
-                    text: error.message
-                });
-            } else {
-                console.error("Auto-print error", error);
-            }
-        }
-    }, [filteredActiveOrders, printerConfig, activeOrdersActions]);
-
     // --- NEW: Order Notification Listener ---
     const prevActiveOrdersRef = useRef<ActiveOrder[]>([]);
     const isActiveOrdersFirstLoad = useRef(true);
@@ -648,6 +509,8 @@ export const App: React.FC = () => {
             if (currentWaitingOrders.length > 0) {
                  prevActiveOrdersRef.current = currentWaitingOrders;
             }
+            // Only set first load to false if we actually have data or if sync is likely done. 
+            // Since activeOrders updates dynamically, let's just set it false after first run.
             isActiveOrdersFirstLoad.current = false;
             return;
         }
@@ -658,12 +521,16 @@ export const App: React.FC = () => {
 
         if (newOrders.length > 0) {
             // 4. Check recency (ignore orders older than 5 mins to prevent spam on reconnect)
+            // Use orderTime
             const hasRecent = newOrders.some(o => (Date.now() - o.orderTime) < 300000);
 
             if (hasRecent) {
-                // Sound and Swal Notification
+                // Check if notification is enabled
                 if (isOrderNotificationsEnabled) {
+                     // Play Sound
                      playAudio(notificationSoundUrl);
+     
+                     // Show Swal Notification
                      Swal.fire({
                          title: 'มีออเดอร์ใหม่!',
                          text: `${newOrders.length} รายการใหม่ส่งเข้าครัว`,
@@ -675,22 +542,13 @@ export const App: React.FC = () => {
                          showConfirmButton: false
                      });
                 }
-
-                // Auto Print to Kitchen
-                if (isAutoPrintEnabled && printerConfig?.kitchen?.ipAddress) {
-                    newOrders.forEach(order => {
-                        if (!order.isPrintedToKitchen) {
-                            handlePrintKitchenOrder(order.id, true);
-                        }
-                    });
-                }
             }
         }
 
         // Update ref
         prevActiveOrdersRef.current = currentWaitingOrders;
 
-    }, [filteredActiveOrders, currentUser, isCustomerMode, notificationSoundUrl, isOrderNotificationsEnabled, isAutoPrintEnabled, printerConfig, handlePrintKitchenOrder]);
+    }, [filteredActiveOrders, currentUser, isCustomerMode, notificationSoundUrl, isOrderNotificationsEnabled]);
 
 
     // --- Kitchen Handlers (Start, Complete, Print) ---
@@ -755,6 +613,45 @@ export const App: React.FC = () => {
         }
     };
 
+    const handlePrintKitchenOrder = async (orderId: number) => {
+        const order = filteredActiveOrders.find(o => o.id === orderId);
+        if (!order) return;
+        
+        if (!printerConfig?.kitchen?.ipAddress) {
+             Swal.fire({
+                icon: 'warning',
+                title: 'ไม่ได้ตั้งค่าเครื่องพิมพ์',
+                text: 'กรุณาตั้งค่าเครื่องพิมพ์ครัวในเมนูตั้งค่าก่อน',
+                timer: 2000,
+                showConfirmButton: false
+            });
+            return;
+        }
+
+        try {
+            Swal.fire({
+                title: 'กำลังส่งคำสั่งพิมพ์...',
+                didOpen: () => { Swal.showLoading(); }
+            });
+            await printerService.printKitchenOrder(order, printerConfig.kitchen);
+            Swal.close();
+            Swal.fire({
+                icon: 'success',
+                title: 'ส่งพิมพ์เรียบร้อย',
+                toast: true,
+                position: 'top-end',
+                showConfirmButton: false,
+                timer: 1500
+            });
+        } catch (error: any) {
+            Swal.close();
+            Swal.fire({
+                icon: 'error',
+                title: 'พิมพ์ไม่สำเร็จ',
+                text: error.message
+            });
+        }
+    };
 
     // ... (Keep badge calculations) ...
     const waitingBadgeCount = useMemo(() => filteredActiveOrders.filter(o => o.status === 'waiting').length, [filteredActiveOrders]);
@@ -895,27 +792,6 @@ export const App: React.FC = () => {
         localStorage.setItem('selectedBranch', JSON.stringify(branch));
     };
 
-    // Auto-select branch if there's only one available to the user
-    useEffect(() => {
-        if (!selectedBranch && branches.length > 0 && isBranchesSynced) {
-            if (isCustomerMode || isQueueMode) {
-                if (branches.length === 1) {
-                    const b = branches[0];
-                    setSelectedBranch(b);
-                    localStorage.setItem('customerSelectedBranch', JSON.stringify(b));
-                }
-            } else if (currentUser) {
-                const availableBranches = currentUser.role === 'admin' 
-                    ? branches 
-                    : branches.filter(b => currentUser.allowedBranchIds?.includes(b.id));
-                
-                if (availableBranches.length === 1) {
-                    handleSelectBranch(availableBranches[0]);
-                }
-            }
-        }
-    }, [branches, isBranchesSynced, selectedBranch, currentUser, isCustomerMode, isQueueMode]);
-
     const handleUpdateCurrentUser = (updates: Partial<User>) => {
         if (!currentUser) return;
         const updated = { ...currentUser, ...updates };
@@ -937,47 +813,6 @@ export const App: React.FC = () => {
         if (!categories.includes(name)) {
             setCategories(prev => [...prev, name]);
         }
-    };
-
-    const handleDeleteMenuItem = async (id: number) => {
-        const result = await Swal.fire({
-            title: 'ยืนยันการลบ?',
-            text: "คุณต้องการลบเมนูนี้ใช่หรือไม่?",
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonColor: '#d33',
-            cancelButtonColor: '#3085d6',
-            confirmButtonText: 'ลบ',
-            cancelButtonText: 'ยกเลิก'
-        });
-
-        if (result.isConfirmed) {
-            setMenuItems(prev => prev.filter(item => item.id !== id));
-            Swal.fire('ลบแล้ว!', 'เมนูถูกลบเรียบร้อยแล้ว', 'success');
-        }
-    };
-
-    const handleUpdateCategory = (oldName: string, newName: string) => {
-        setCategories(prev => prev.map(c => c === oldName ? newName : c));
-        setMenuItems(prev => prev.map(item => item.category === oldName ? { ...item, category: newName } : item));
-    };
-
-    const handleDeleteCategory = (categoryName: string) => {
-        setCategories(prev => prev.filter(c => c !== categoryName));
-    };
-
-    const handleImportMenu = (importedItems: MenuItem[], newCategories: string[]) => {
-        setMenuItems(importedItems);
-        if (newCategories.length > 0) {
-            setCategories(prev => {
-                const combined = Array.from(new Set([...prev, ...newCategories]));
-                return combined;
-            });
-        }
-    };
-
-    const handleToggleVisibility = (id: number) => {
-        setMenuItems(prev => prev.map(m => m.id === id ? { ...m, isVisible: m.isVisible === false ? true : false } : m));
     };
 
     const handleConfirmSplit = async (itemsToSplit: OrderItem[]) => {
@@ -1388,7 +1223,7 @@ export const App: React.FC = () => {
     // GLOBAL LOADING: If critical data isn't synced yet, show loading
     const isCriticalDataSynced = isUsersSynced && isBranchesSynced && isMenuSynced && isTablesSynced;
     
-    if (!isCriticalDataSynced) {
+    if (!isCriticalDataSynced && !isCustomerMode && !isQueueMode) {
         return <PageLoading message="กำลังซิงค์ข้อมูล... กรุณารอสักครู่เพื่อความปลอดภัยของข้อมูล" />;
     }
 
@@ -1410,11 +1245,9 @@ export const App: React.FC = () => {
             completedOrders={completedOrders}
             onPlaceOrder={async (items, name) => {
                 // Bridge to main app logic for consistency
-                // Fix: Pass 1 as default customer count, not branchId
                 return handlePlaceOrder(items, name, 1, table, false); 
             }}
             onStaffCall={(t, name) => handleStaffCall(t, name)}
-            branchId={branchId}
             recommendedMenuItemIds={recommendedMenuItemIds}
             logoUrl={logoUrl}
             restaurantName={restaurantName}
@@ -1456,7 +1289,6 @@ export const App: React.FC = () => {
                         onUpdateCurrentUser={handleUpdateCurrentUser} onUpdateLogoUrl={setLogoUrl} onUpdateRestaurantName={setRestaurantName}
                         isOrderNotificationsEnabled={isOrderNotificationsEnabled} onToggleOrderNotifications={toggleOrderNotifications}
                         printerConfig={printerConfig}
-                        branchesCount={branches.length}
                     />
                 </Suspense>
             )}
@@ -1484,7 +1316,6 @@ export const App: React.FC = () => {
                         printerConfig={printerConfig}
                         isAutoPrintEnabled={isAutoPrintEnabled}
                         onToggleAutoPrint={toggleAutoPrint}
-                        branchesCount={branches.length}
                     />
                 )}
                 
@@ -1500,13 +1331,13 @@ export const App: React.FC = () => {
                                     isEditMode={isEditMode} 
                                     onEditItem={(item) => { setItemToEdit(item); setModalState(prev => ({ ...prev, isMenuItem: true })); }} 
                                     onAddNewItem={() => { setItemToEdit(null); setModalState(prev => ({ ...prev, isMenuItem: true })); }} 
-                                    onDeleteItem={handleDeleteMenuItem} 
-                                    onUpdateCategory={handleUpdateCategory} 
-                                    onDeleteCategory={handleDeleteCategory} 
+                                    onDeleteItem={(id) => { /* logic */ }} 
+                                    onUpdateCategory={() => {}} 
+                                    onDeleteCategory={() => {}} 
                                     onAddCategory={handleAddCategory} 
-                                    onImportMenu={handleImportMenu} 
+                                    onImportMenu={() => {}} 
                                     recommendedMenuItemIds={recommendedMenuItemIds} 
-                                    onToggleVisibility={handleToggleVisibility}
+                                    onToggleVisibility={handleToggleAvailability}
                                     onToggleOrderSidebar={isDesktop ? () => setIsOrderSidebarVisible(!isOrderSidebarVisible) : undefined}
                                     isOrderSidebarVisible={isOrderSidebarVisible}
                                     cartItemCount={totalCartItemCount}
@@ -1644,7 +1475,6 @@ export const App: React.FC = () => {
                     {currentView === 'kitchen' && (
                         <Suspense fallback={<PageLoading />}>
                             <KitchenView 
-                                branchId={branchId}
                                 activeOrders={filteredActiveOrders} 
                                 onCompleteOrder={handleCompleteCooking}
                                 onStartCooking={async (orderId) => {

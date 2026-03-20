@@ -15,7 +15,6 @@ interface CustomerViewProps {
     completedOrders: CompletedOrder[];
     onPlaceOrder: (items: OrderItem[], customerName: string) => Promise<ActiveOrder | undefined>;
     onStaffCall: (table: Table, customerName: string) => void;
-    branchId: string | null;
     recommendedMenuItemIds: number[];
     logoUrl: string | null;
     restaurantName: string;
@@ -30,7 +29,6 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
     completedOrders,
     onPlaceOrder,
     onStaffCall,
-    branchId,
     recommendedMenuItemIds,
     logoUrl,
     restaurantName
@@ -121,11 +119,12 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
 
     // 2. Direct Firestore Listener for Completed Orders (Fix for missing props data & Index Issues)
     useEffect(() => {
-        const bId = branchId || branchIdParam;
-        if (!db || !bId || !table) return;
+        if (!db || !branchIdParam || !table) return;
 
         // Query the latest 20 completed orders for the branch.
-        const unsubscribe = db.collection(`branches/${bId}/completedOrders_v2`)
+        // We do NOT filter by tableId in the query to avoid needing a composite index.
+        // We filter in memory instead.
+        const unsubscribe = db.collection(`branches/${branchIdParam}/completedOrders_v2`)
             .orderBy('completionTime', 'desc')
             .limit(20) 
             .onSnapshot((snapshot: any) => {

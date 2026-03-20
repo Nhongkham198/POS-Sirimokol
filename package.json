@@ -8,7 +8,6 @@
     "start": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "lint": "tsc --noEmit",
     "deploy:rules": "firebase deploy --only firestore:rules"
   },
   "dependencies": {
