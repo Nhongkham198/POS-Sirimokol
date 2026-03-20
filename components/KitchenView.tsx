@@ -4,6 +4,7 @@ import type { ActiveOrder } from '../types';
 import { KitchenOrderCard } from './KitchenOrderCard';
 
 interface KitchenViewProps {
+    branchId: string | null;
     activeOrders: ActiveOrder[];
     onCompleteOrder: (orderId: number) => void;
     onStartCooking: (orderId: number) => void;
@@ -13,6 +14,7 @@ interface KitchenViewProps {
 }
 
 export const KitchenView: React.FC<KitchenViewProps> = ({ 
+    branchId,
     activeOrders, 
     onCompleteOrder, 
     onStartCooking, 
@@ -45,7 +47,7 @@ export const KitchenView: React.FC<KitchenViewProps> = ({
                     </svg>
                     <div className="flex flex-col">
                         <h2 className="text-lg font-bold text-white tracking-wide leading-none">หน้าจอครัว (KDS)</h2>
-                        <span className="text-[10px] text-gray-400 font-mono">Branch ID: {activeOrders[0]?.branchId || 'Syncing...'}</span>
+                        <span className="text-[10px] text-gray-400 font-mono">Branch ID: {branchId || 'Not Selected'}</span>
                     </div>
                 </div>
 

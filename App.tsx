@@ -1644,6 +1644,7 @@ export const App: React.FC = () => {
                     {currentView === 'kitchen' && (
                         <Suspense fallback={<PageLoading />}>
                             <KitchenView 
+                                branchId={branchId}
                                 activeOrders={filteredActiveOrders} 
                                 onCompleteOrder={handleCompleteCooking}
                                 onStartCooking={async (orderId) => {
