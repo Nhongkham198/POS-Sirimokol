@@ -397,7 +397,14 @@ export function useFirestoreCollection<T extends { id: number | string }>(
         const unsubscribe = collectionRef.onSnapshot(snapshot => {
             const items: T[] = [];
             snapshot.forEach(doc => {
-                items.push(doc.data() as T);
+                const data = doc.data();
+                // Ensure id is always present, prioritizing doc.id if missing in data
+                // Convert to number if it's a numeric string to match ActiveOrder interface
+                const id = isNaN(Number(doc.id)) ? doc.id : Number(doc.id);
+                items.push({ 
+                    ...data,
+                    id: id
+                } as T);
             });
             console.log(`[Debug] useFirestoreCollection: Received ${items.length} items from ${path}`);
             setData(items);

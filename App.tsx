@@ -252,7 +252,10 @@ export const App: React.FC = () => {
     }, [rawActiveOrders]);
 
     const filteredActiveOrders = useMemo(() => {
-        console.log(`[Debug] rawActiveOrders count: ${rawActiveOrders.length}`, rawActiveOrders.map(o => ({ id: o.id, status: o.status, branchId: o.branchId })));
+        console.log(`[Debug] rawActiveOrders count: ${rawActiveOrders.length}`);
+        rawActiveOrders.forEach(o => {
+            console.log(`[Debug] Order ID: ${o.id}, Status: ${o.status}, Branch: ${o.branchId}, Table: ${o.tableId}`);
+        });
         // Ensure we include 'waiting' status which is what new orders get
         return rawActiveOrders.filter(o => 
             o.status === 'waiting' || 
