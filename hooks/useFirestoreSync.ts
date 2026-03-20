@@ -417,7 +417,10 @@ export function useFirestoreCollection<T extends { id: number | string }>(
 
     const actions = {
         add: async (item: T) => {
-            if (!db || !branchId) return;
+            if (!db || !branchId) {
+                console.error(`[Error] useFirestoreCollection: Cannot add item. db: ${!!db}, branchId: ${branchId}`, { collectionName, item });
+                return;
+            }
             const docId = item.id.toString();
             const fullPath = `branches/${branchId}/${collectionName}/${docId}`;
             console.log(`[Debug] useFirestoreCollection: Adding item to ${fullPath}`, item);

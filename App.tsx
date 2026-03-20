@@ -175,11 +175,19 @@ export const App: React.FC = () => {
         });
     };
     
-    const [isQueueMode, setIsQueueMode] = useState(() => window.location.pathname === '/queue');
+    const [isQueueMode, setIsQueueMode] = useState(() => window.location.pathname === '/queue' || window.location.search.includes('mode=queue'));
 
     const [isCustomerMode, setIsCustomerMode] = useState(() => {
-        const params = new URLSearchParams(window.location.search);
+        const pathname = window.location.pathname;
+        const search = window.location.search;
+        const params = new URLSearchParams(search);
+        
+        if (pathname === '/customer' || pathname.startsWith('/customer/') || pathname.includes('mode=customer')) return true;
         if (params.get('mode') === 'customer') return true;
+        
+        // Also check if it's a mangled URL like /customer&branchId=...
+        if (pathname.includes('/customer&') || pathname.includes('/customer?')) return true;
+
         const storedUser = localStorage.getItem('currentUser');
         if (storedUser) {
             try {
@@ -193,8 +201,19 @@ export const App: React.FC = () => {
     });
 
     const [customerTableId, setCustomerTableId] = useState<number | null>(() => {
-        const params = new URLSearchParams(window.location.search);
-        const tableIdParam = params.get('tableId');
+        const search = window.location.search;
+        const pathname = window.location.pathname;
+        
+        // Try to get from search params first
+        const params = new URLSearchParams(search);
+        let tableIdParam = params.get('tableId');
+        
+        // If not found, try to parse from pathname (handles mangled URLs)
+        if (!tableIdParam && (pathname.includes('tableId='))) {
+            const match = pathname.match(/tableId=([^&]+)/);
+            if (match) tableIdParam = match[1];
+        }
+
         if (tableIdParam) return Number(tableIdParam);
         const storedUser = localStorage.getItem('currentUser');
         if (storedUser) {
@@ -208,7 +227,20 @@ export const App: React.FC = () => {
         return null;
     });
     
-    const urlBranchId = useMemo(() => new URLSearchParams(window.location.search).get('branchId'), []);
+    const urlBranchId = useMemo(() => {
+        const search = window.location.search;
+        const pathname = window.location.pathname;
+        
+        const params = new URLSearchParams(search);
+        let branchId = params.get('branchId');
+        
+        if (!branchId && pathname.includes('branchId=')) {
+            const match = pathname.match(/branchId=([^&]+)/);
+            if (match) branchId = match[1];
+        }
+        
+        return branchId;
+    }, []);
     
     // FIX: Prioritize urlBranchId for customers to ensure they always order to the correct branch from QR code
     const branchId = useMemo(() => {
@@ -247,22 +279,25 @@ export const App: React.FC = () => {
     // Active Orders
     const [rawActiveOrders, activeOrdersActions] = useFirestoreCollection<ActiveOrder>(branchId, 'activeOrders');
     
-    const activeOrders = useMemo(() => {
-        return rawActiveOrders.filter(o => o.status === 'waiting' || o.status === 'cooking' || o.status === 'served');
-    }, [rawActiveOrders]);
-
     const filteredActiveOrders = useMemo(() => {
-        console.log(`[Debug] rawActiveOrders count: ${rawActiveOrders.length}`);
-        rawActiveOrders.forEach(o => {
-            console.log(`[Debug] Order ID: ${o.id}, Status: ${o.status}, Branch: ${o.branchId}, Table: ${o.tableId}`);
-        });
-        // Ensure we include 'waiting' status which is what new orders get
-        return rawActiveOrders.filter(o => 
+        const filtered = rawActiveOrders.filter(o => 
             o.status === 'waiting' || 
             o.status === 'cooking' || 
             o.status === 'served'
         );
-    }, [rawActiveOrders]);
+        
+        console.log(`[Debug] Kitchen Sync:`, {
+            branchId,
+            totalRaw: rawActiveOrders.length,
+            totalFiltered: filtered.length,
+            rawStatuses: rawActiveOrders.map(o => o.status),
+            rawIds: rawActiveOrders.map(o => o.id)
+        });
+        
+        return filtered;
+    }, [rawActiveOrders, branchId]);
+
+    const activeOrders = filteredActiveOrders; // Use the same filtered list for consistency
 
 
     // --- HEAVY DATA ---
@@ -374,6 +409,17 @@ export const App: React.FC = () => {
         }
 
         setIsPlacingOrder(true);
+        if (!branchId) {
+            console.error('[Error] handlePlaceOrder: branchId is null. Cannot place order.', { 
+                isCustomerMode, 
+                urlBranchId, 
+                customerTableId,
+                selectedBranchId: selectedBranch?.id 
+            });
+            Swal.fire('เกิดข้อผิดพลาด', 'ไม่พบข้อมูลสาขา กรุณาสแกน QR Code ใหม่', 'error');
+            return null;
+        }
+
         const orderPath = `branches/${branchId}/activeOrders`;
         console.log(`[Order] Placing order at ${orderPath}`, { items, custName, tableOverride });
         try {
